@@ -114,9 +114,7 @@ def login_page():
             if username in users and users[username] == hash_password(password):
                 st.session_state.logged_in = True
                 st.session_state.user = username
-
                 st.session_state.portfolio = portfolios.get(username, [])
-
                 st.rerun()
             else:
                 st.error("Invalid login")
@@ -134,6 +132,21 @@ st.write(f"Welcome {st.session_state.user}")
 if st.button("Logout"):
     st.session_state.logged_in = False
     st.rerun()
+
+# =============================
+# STOCK CHART VIEWER (NEW ADDITION)
+# =============================
+st.subheader("📈 Stock Chart Viewer")
+
+chart_ticker = st.text_input("Enter ticker for chart (e.g. AAPL)")
+
+if chart_ticker:
+    data = yf.Ticker(chart_ticker).history(period="6mo")
+
+    if not data.empty:
+        st.line_chart(data["Close"])
+    else:
+        st.error("No data found for this ticker")
 
 # =============================
 # STOCK DATA
