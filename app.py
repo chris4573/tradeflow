@@ -27,8 +27,11 @@ def hash_password(password):
 # =============================
 def load_json(path, default):
     if os.path.exists(path):
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return default
     return default
 
 def save_json(path, data):
@@ -39,6 +42,93 @@ users = load_json(USERS_FILE, {})
 portfolios = load_json(PORTFOLIO_FILE, {})
 history = load_json(HISTORY_FILE, {})
 sales_history = load_json(SALES_FILE, {})
+
+# =============================
+# REPAIR OLD / MISSING DATA
+# =============================
+def repair_data():
+    updated_portfolios = False
+    updated_history = False
+    updated_sales = False
+
+    # Make sure top-level objects are dicts
+    if not isinstance(portfolios, dict):
+        portfolios.clear()
+        updated_portfolios = True
+
+    if not isinstance(history, dict):
+        history.clear()
+        updated_history = True
+
+    if not isinstance(sales_history, dict):
+        sales_history.clear()
+        updated_sales = True
+
+    # Repair old portfolio trades
+    for username, user_portfolio in list(portfolios.items()):
+        if not isinstance(user_portfolio, list):
+            portfolios[username] = []
+            updated_portfolios = True
+            continue
+
+        for trade in user_portfolio:
+            if not isinstance(trade, dict):
+                continue
+
+            if "Ticker" not in trade:
+                trade["Ticker"] = "UNKNOWN"
+                updated_portfolios = True
+
+            if "Amount" not in trade:
+                trade["Amount"] = 0.0
+                updated_portfolios = True
+
+            if "Price" not in trade:
+                trade["Price"] = 0.0
+                updated_portfolios = True
+
+            if "Shares" not in trade:
+                try:
+                    price = float(trade.get("Price", 0))
+                    amount = float(trade.get("Amount", 0))
+                    trade["Shares"] = amount / price if price > 0 else 0.0
+                except Exception:
+                    trade["Shares"] = 0.0
+                updated_portfolios = True
+
+            if "Time" not in trade:
+                trade["Time"] = "Older trade"
+                updated_portfolios = True
+
+    # Repair history structure
+    for username, records in list(history.items()):
+        if not isinstance(records, list):
+            history[username] = []
+            updated_history = True
+            continue
+
+        cleaned = []
+        for record in records:
+            if isinstance(record, dict) and "time" in record and "value" in record:
+                cleaned.append(record)
+        if len(cleaned) != len(records):
+            history[username] = cleaned
+            updated_history = True
+
+    # Repair sales structure
+    for username, records in list(sales_history.items()):
+        if not isinstance(records, list):
+            sales_history[username] = []
+            updated_sales = True
+
+    if updated_portfolios:
+        save_json(PORTFOLIO_FILE, portfolios)
+    if updated_history:
+        save_json(HISTORY_FILE, history)
+    if updated_sales:
+        save_json(SALES_FILE, sales_history)
+
+repair_data()
 
 # =============================
 # PRICE FETCH
@@ -138,7 +228,7 @@ def save_user_portfolio():
 
 def save_user_sale(record):
     user = st.session_state.user
-    if user not in sales_history:
+    if user not in sales_history or not isinstance(sales_history[user], list):
         sales_history[user] = []
     sales_history[user].append(record)
     save_json(SALES_FILE, sales_history)
@@ -149,9 +239,14 @@ def save_user_sale(record):
 def get_portfolio_value(portfolio):
     total = 0.0
     for trade in portfolio:
-        current_price = get_price(trade["Ticker"])
+        ticker = trade.get("Ticker")
+        shares = float(trade.get("Shares", 0))
+        if not ticker:
+            continue
+
+        current_price = get_price(ticker)
         if current_price is not None:
-            total += current_price * trade["Shares"]
+            total += current_price * shares
     return total
 
 def build_portfolio_df(portfolio):
@@ -160,25 +255,31 @@ def build_portfolio_df(portfolio):
 
     rows = []
     for idx, trade in enumerate(portfolio):
-        current_price = get_price(trade["Ticker"])
+        ticker = trade.get("Ticker", "UNKNOWN")
+        amount = float(trade.get("Amount", 0.0))
+        buy_price = float(trade.get("Price", 0.0))
+        shares = float(trade.get("Shares", 0.0))
+        trade_time = trade.get("Time", "Older trade")
+
+        current_price = get_price(ticker)
         market_value = None
         unrealized = None
 
         if current_price is not None:
-            market_value = current_price * trade["Shares"]
-            unrealized = market_value - trade["Amount"]
+            market_value = current_price * shares
+            unrealized = market_value - amount
 
         rows.append({
             "ID": idx,
-            "Ticker": trade["Ticker"],
-            "Name": company_names.get(trade["Ticker"], trade["Ticker"]),
-            "Amount": round(trade["Amount"], 2),
-            "Buy Price": round(trade["Price"], 2),
+            "Ticker": ticker,
+            "Name": company_names.get(ticker, ticker),
+            "Amount": round(amount, 2),
+            "Buy Price": round(buy_price, 2),
             "Current Price": round(current_price, 2) if current_price is not None else None,
-            "Shares": round(trade["Shares"], 4),
+            "Shares": round(shares, 4),
             "Market Value": round(market_value, 2) if market_value is not None else None,
             "Unrealized P/L": round(unrealized, 2) if unrealized is not None else None,
-            "Time": trade["Time"]
+            "Time": trade_time
         })
 
     return pd.DataFrame(rows)
@@ -243,14 +344,14 @@ if search and not stocks_df.empty:
         stocks_df["Name"].str.upper().str.contains(q, na=False)
     ].head(25)
 else:
-    matches_df = stocks_df.head(25)
+    matches_df = stocks_df.head(25) if not stocks_df.empty else pd.DataFrame(columns=["Ticker", "Name"])
 
 options = []
 for _, row in matches_df.iterrows():
     t = row["Ticker"]
     name = row["Name"]
     price = get_price(t)
-    if price:
+    if price is not None:
         options.append(f"{t} - {name} (${price:.2f})")
     else:
         options.append(f"{t} - {name} (N/A)")
@@ -267,7 +368,7 @@ amount = st.sidebar.number_input("Amount ($)", min_value=1.0, value=100.0, step=
 
 if st.sidebar.button("Add Trade") and ticker:
     price = get_price(ticker)
-    if price:
+    if price is not None and price > 0:
         trade = {
             "Ticker": ticker,
             "Amount": float(amount),
@@ -292,7 +393,7 @@ portfolio_df = build_portfolio_df(st.session_state.portfolio)
 if not portfolio_df.empty:
     st.dataframe(portfolio_df, use_container_width=True)
 
-    invested = float(portfolio_df["Amount"].sum())
+    invested = float(portfolio_df["Amount"].fillna(0).sum())
     current_value = float(portfolio_df["Market Value"].fillna(0).sum())
     unrealized_profit = current_value - invested
 
@@ -317,7 +418,7 @@ if not portfolio_df.empty:
     selected_label = st.selectbox("Select a trade", trade_labels)
     selected_id = int(selected_label.split("|")[0].replace("ID", "").strip())
     selected_trade = st.session_state.portfolio[selected_id]
-    selected_current_price = get_price(selected_trade["Ticker"]) or 0.0
+    selected_current_price = get_price(selected_trade.get("Ticker", "")) or 0.0
 
     c1, c2 = st.columns(2)
 
@@ -326,62 +427,66 @@ if not portfolio_df.empty:
         if st.button("Delete Selected Trade"):
             deleted = st.session_state.portfolio.pop(selected_id)
             save_user_portfolio()
-            st.success(f"Deleted {deleted['Ticker']} trade")
+            st.success(f"Deleted {deleted.get('Ticker', 'trade')} trade")
             st.rerun()
 
     with c2:
         st.markdown("### Sell Trade")
-        max_shares = float(selected_trade["Shares"])
-        sell_shares = st.number_input(
-            "Shares to sell",
-            min_value=0.0001,
-            max_value=max_shares,
-            value=max_shares,
-            step=0.0001,
-            format="%.4f",
-            key=f"sell_{selected_id}"
-        )
+        max_shares = float(selected_trade.get("Shares", 0.0))
 
-        avg_buy_price = float(selected_trade["Price"])
-        estimated_sale_value = sell_shares * selected_current_price
-        estimated_cost_basis = sell_shares * avg_buy_price
-        estimated_pl = estimated_sale_value - estimated_cost_basis
+        if max_shares > 0:
+            sell_shares = st.number_input(
+                "Shares to sell",
+                min_value=0.0001,
+                max_value=max_shares,
+                value=max_shares,
+                step=0.0001,
+                format="%.4f",
+                key=f"sell_{selected_id}"
+            )
 
-        st.write(f"Current price: ${selected_current_price:.2f}")
-        st.write(f"Estimated sale value: ${estimated_sale_value:.2f}")
+            avg_buy_price = float(selected_trade.get("Price", 0.0))
+            estimated_sale_value = sell_shares * selected_current_price
+            estimated_cost_basis = sell_shares * avg_buy_price
+            estimated_pl = estimated_sale_value - estimated_cost_basis
 
-        if estimated_pl >= 0:
-            st.success(f"Estimated realized profit: ${estimated_pl:.2f}")
-        else:
-            st.error(f"Estimated realized loss: ${abs(estimated_pl):.2f}")
+            st.write(f"Current price: ${selected_current_price:.2f}")
+            st.write(f"Estimated sale value: ${estimated_sale_value:.2f}")
 
-        if st.button("Sell Selected Shares"):
-            realized_sale_value = sell_shares * selected_current_price
-            realized_cost_basis = sell_shares * avg_buy_price
-            realized_pl = realized_sale_value - realized_cost_basis
-
-            sale_record = {
-                "Ticker": selected_trade["Ticker"],
-                "Shares Sold": round(sell_shares, 4),
-                "Sell Price": round(selected_current_price, 2),
-                "Sale Value": round(realized_sale_value, 2),
-                "Cost Basis": round(realized_cost_basis, 2),
-                "Realized P/L": round(realized_pl, 2),
-                "Sold At": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            }
-
-            remaining_shares = selected_trade["Shares"] - sell_shares
-            if remaining_shares <= 0.0000001:
-                st.session_state.portfolio.pop(selected_id)
+            if estimated_pl >= 0:
+                st.success(f"Estimated realized profit: ${estimated_pl:.2f}")
             else:
-                remaining_amount = remaining_shares * avg_buy_price
-                st.session_state.portfolio[selected_id]["Shares"] = remaining_shares
-                st.session_state.portfolio[selected_id]["Amount"] = remaining_amount
+                st.error(f"Estimated realized loss: ${abs(estimated_pl):.2f}")
 
-            save_user_portfolio()
-            save_user_sale(sale_record)
-            st.success(f"Sold {sell_shares:.4f} shares of {selected_trade['Ticker']}")
-            st.rerun()
+            if st.button("Sell Selected Shares"):
+                realized_sale_value = sell_shares * selected_current_price
+                realized_cost_basis = sell_shares * avg_buy_price
+                realized_pl = realized_sale_value - realized_cost_basis
+
+                sale_record = {
+                    "Ticker": selected_trade.get("Ticker", "UNKNOWN"),
+                    "Shares Sold": round(sell_shares, 4),
+                    "Sell Price": round(selected_current_price, 2),
+                    "Sale Value": round(realized_sale_value, 2),
+                    "Cost Basis": round(realized_cost_basis, 2),
+                    "Realized P/L": round(realized_pl, 2),
+                    "Sold At": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                }
+
+                remaining_shares = float(selected_trade.get("Shares", 0.0)) - sell_shares
+                if remaining_shares <= 0.0000001:
+                    st.session_state.portfolio.pop(selected_id)
+                else:
+                    remaining_amount = remaining_shares * avg_buy_price
+                    st.session_state.portfolio[selected_id]["Shares"] = remaining_shares
+                    st.session_state.portfolio[selected_id]["Amount"] = remaining_amount
+
+                save_user_portfolio()
+                save_user_sale(sale_record)
+                st.success(f"Sold {sell_shares:.4f} shares of {selected_trade.get('Ticker', 'UNKNOWN')}")
+                st.rerun()
+        else:
+            st.warning("This trade has 0 shares and cannot be sold.")
 else:
     st.info("Add trades to manage them")
 
@@ -391,15 +496,16 @@ else:
 st.subheader("Sales History")
 
 user_sales = sales_history.get(st.session_state.user, [])
-if user_sales:
+if isinstance(user_sales, list) and user_sales:
     sales_df = pd.DataFrame(user_sales)
     st.dataframe(sales_df, use_container_width=True)
 
-    total_realized = float(sales_df["Realized P/L"].sum())
-    if total_realized >= 0:
-        st.success(f"Total Realized Profit/Loss: ${total_realized:.2f}")
-    else:
-        st.error(f"Total Realized Profit/Loss: ${total_realized:.2f}")
+    if "Realized P/L" in sales_df.columns:
+        total_realized = float(sales_df["Realized P/L"].fillna(0).sum())
+        if total_realized >= 0:
+            st.success(f"Total Realized Profit/Loss: ${total_realized:.2f}")
+        else:
+            st.error(f"Total Realized Profit/Loss: ${total_realized:.2f}")
 else:
     st.info("No sales yet")
 
@@ -412,8 +518,10 @@ watchlist = ["AAPL", "MSFT", "TSLA", "NVDA", "AMZN", "GOOGL", "META"]
 for t in watchlist:
     price = get_price(t)
     name = company_names.get(t, t)
-    if price:
+    if price is not None:
         st.write(f"{t} - {name}: ${price:.2f}")
+    else:
+        st.write(f"{t} - {name}: N/A")
 
 # =============================
 # PORTFOLIO HISTORY
@@ -421,17 +529,31 @@ for t in watchlist:
 st.subheader("Portfolio History")
 
 user = st.session_state.user
-if user not in history:
+if user not in history or not isinstance(history[user], list):
     history[user] = []
 
 current_value_now = get_portfolio_value(st.session_state.portfolio)
+current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-history[user].append({
-    "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-    "value": current_value_now
-})
-save_json(HISTORY_FILE, history)
+# Only append if last entry is different
+should_append = True
+if history[user]:
+    last_entry = history[user][-1]
+    if isinstance(last_entry, dict):
+        last_value = last_entry.get("value")
+        last_time = last_entry.get("time")
+        if last_value == current_value_now and last_time == current_time:
+            should_append = False
+
+if should_append:
+    history[user].append({
+        "time": current_time,
+        "value": current_value_now
+    })
+    save_json(HISTORY_FILE, history)
 
 df_hist = pd.DataFrame(history[user])
-if not df_hist.empty:
+if not df_hist.empty and "time" in df_hist.columns and "value" in df_hist.columns:
     st.line_chart(df_hist.set_index("time")["value"])
+else:
+    st.info("No portfolio history yet.")
