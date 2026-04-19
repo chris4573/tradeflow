@@ -238,8 +238,9 @@ for _, row in matches_df.iterrows():
 
 if options:
     selection = st.sidebar.selectbox("Select Stock", options)
-    ticker = selection.split(" - ")[0]
+    ticker = selection.split(" - ", 1)[0].strip()
 else:
+    selection = None
     ticker = None
     st.sidebar.warning("No matching stocks found.")
 
