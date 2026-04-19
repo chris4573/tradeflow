@@ -26,7 +26,7 @@ SALES_FILE = "sales_history.json"
 st.markdown("""
 <style>
     .stApp {
-        background: linear-gradient(180deg, #f4f7fb 0%, #eaf1fb 100%);
+        background: linear-gradient(180deg, #eef3fb 0%, #e4ecf8 100%);
     }
 
     .block-container {
@@ -34,7 +34,7 @@ st.markdown("""
         padding-bottom: 1.2rem;
     }
 
-    /* Sidebar */
+    /* Hide sidebar on login screen feel */
     section[data-testid="stSidebar"] {
         background: linear-gradient(180deg, #031b4e 0%, #02153c 100%);
     }
@@ -78,15 +78,15 @@ st.markdown("""
         border-radius: 12px;
         font-weight: 700;
         width: 100%;
-        padding: 0.7rem 1rem;
+        padding: 0.75rem 1rem;
         border: none;
-        background: linear-gradient(135deg, #123d9b 0%, #0f57d5 100%);
+        background: linear-gradient(135deg, #1f64ff 0%, #1456eb 100%);
         color: white;
-        box-shadow: 0 8px 20px rgba(15, 87, 213, 0.18);
+        box-shadow: 0 10px 24px rgba(20, 86, 235, 0.2);
     }
 
     .stButton > button:hover {
-        filter: brightness(1.05);
+        filter: brightness(1.04);
     }
 
     .main-title {
@@ -287,55 +287,412 @@ st.markdown("""
         font-size: 0.9rem;
     }
 
-    /* Auth screen */
-    .auth-wrap {
-        max-width: 460px;
-        margin: 3rem auto 1rem auto;
+    /* LOGIN PAGE */
+    .auth-shell {
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 1.5rem 0;
     }
 
-    .auth-card {
-        background: rgba(255,255,255,0.96);
-        border: 1px solid #e6edf5;
-        border-radius: 24px;
-        padding: 28px;
+    .auth-grid {
+        width: 100%;
+        max-width: 1180px;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 28px;
+        align-items: stretch;
+    }
+
+    .auth-left {
+        position: relative;
+        overflow: hidden;
+        border-radius: 28px;
+        padding: 42px 34px;
+        background:
+            linear-gradient(180deg, rgba(255,255,255,0.55), rgba(255,255,255,0.35)),
+            linear-gradient(135deg, #edf3ff 0%, #dde8fb 100%);
+        border: 1px solid rgba(255,255,255,0.75);
         box-shadow: 0 18px 50px rgba(16, 42, 67, 0.10);
-        backdrop-filter: blur(6px);
+        min-height: 720px;
     }
 
-    .auth-badge {
-        display: inline-block;
-        padding: 0.4rem 0.8rem;
+    .auth-left::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background:
+            linear-gradient(to right, rgba(31,100,255,0.06) 1px, transparent 1px),
+            linear-gradient(to bottom, rgba(31,100,255,0.06) 1px, transparent 1px);
+        background-size: 40px 40px;
+        opacity: 0.45;
+        pointer-events: none;
+    }
+
+    .auth-chart {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        height: 55%;
+        opacity: 0.22;
+        pointer-events: none;
+    }
+
+    .chart-line {
+        position: absolute;
+        left: 4%;
+        right: 4%;
+        bottom: 16%;
+        height: 3px;
+        background: linear-gradient(90deg, #7aa7ff, #2f5bea);
+        transform: rotate(-18deg);
         border-radius: 999px;
-        background: #e8f0ff;
-        color: #0f57d5;
+        box-shadow: 0 0 18px rgba(47,91,234,0.18);
+    }
+
+    .chart-dot {
+        position: absolute;
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        background: #7aa7ff;
+        box-shadow: 0 0 0 5px rgba(122,167,255,0.15);
+    }
+
+    .c1 { left: 6%; bottom: 6%; }
+    .c2 { left: 19%; bottom: 14%; }
+    .c3 { left: 33%; bottom: 10%; }
+    .c4 { left: 47%; bottom: 22%; }
+    .c5 { left: 60%; bottom: 17%; }
+    .c6 { left: 74%; bottom: 31%; }
+    .c7 { left: 88%; bottom: 46%; }
+
+    .candle {
+        position: absolute;
+        bottom: 0;
+        width: 12px;
+        border-radius: 10px;
+        opacity: 0.30;
+    }
+
+    .green { background: linear-gradient(180deg, #7de3c8 0%, #12b886 100%); }
+    .red { background: linear-gradient(180deg, #ffc3cc 0%, #ef4444 100%); }
+
+    .ca1 { left: 8%; height: 80px; }
+    .ca2 { left: 16%; height: 130px; }
+    .ca3 { left: 24%; height: 90px; }
+    .ca4 { left: 34%; height: 170px; }
+    .ca5 { left: 44%; height: 110px; }
+    .ca6 { left: 54%; height: 190px; }
+    .ca7 { left: 64%; height: 150px; }
+    .ca8 { left: 74%; height: 220px; }
+    .ca9 { left: 84%; height: 250px; }
+
+    .ticker-bar {
+        background: linear-gradient(180deg, #031b4e 0%, #02153c 100%);
+        border-radius: 20px;
+        padding: 14px 18px;
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 10px;
+        margin-bottom: 34px;
+        box-shadow: 0 8px 24px rgba(16, 42, 67, 0.14);
+    }
+
+    .ticker-item {
+        color: white;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
         font-weight: 700;
-        font-size: 0.85rem;
-        margin-bottom: 1rem;
+        font-size: 0.98rem;
+    }
+
+    .ticker-up { color: #12d39a; }
+    .ticker-down { color: #ff5f73; }
+
+    .brand-logo {
+        font-size: 3.2rem;
+        font-weight: 900;
+        color: #1f64ff;
+        line-height: 1;
+        margin-bottom: 8px;
+        position: relative;
+        z-index: 2;
+    }
+
+    .brand-name {
+        font-size: 3.5rem;
+        font-weight: 900;
+        line-height: 1;
+        color: #102a43;
+        margin-bottom: 8px;
+        position: relative;
+        z-index: 2;
+    }
+
+    .brand-name span {
+        color: #1f64ff;
+    }
+
+    .brand-tag {
+        font-size: 1rem;
+        font-weight: 800;
+        letter-spacing: 0.12em;
+        color: #2f5bea;
+        margin-bottom: 44px;
+        position: relative;
+        z-index: 2;
+    }
+
+    .hero-title {
+        font-size: 4rem;
+        line-height: 1.04;
+        font-weight: 900;
+        color: #102a43;
+        margin-bottom: 18px;
+        position: relative;
+        z-index: 2;
+    }
+
+    .hero-title span {
+        color: #2f5bea;
+    }
+
+    .hero-sub {
+        font-size: 1.35rem;
+        color: #486581;
+        max-width: 500px;
+        margin-bottom: 34px;
+        position: relative;
+        z-index: 2;
+    }
+
+    .feature-list {
+        display: grid;
+        gap: 18px;
+        position: relative;
+        z-index: 2;
+    }
+
+    .feature-item {
+        display: flex;
+        align-items: flex-start;
+        gap: 16px;
+    }
+
+    .feature-icon {
+        width: 62px;
+        height: 62px;
+        border-radius: 18px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.6rem;
+        font-weight: 800;
+        flex-shrink: 0;
+    }
+
+    .feature-blue { background: #dce7ff; color: #2f5bea; }
+    .feature-green { background: #dcf7ef; color: #12b886; }
+    .feature-purple { background: #ece6ff; color: #7c3aed; }
+
+    .feature-title {
+        font-size: 1.55rem;
+        font-weight: 800;
+        color: #102a43;
+        margin-bottom: 2px;
+    }
+
+    .feature-sub {
+        font-size: 1.1rem;
+        color: #486581;
+    }
+
+    .auth-right {
+        background: rgba(255,255,255,0.88);
+        border: 1px solid rgba(255,255,255,0.85);
+        border-radius: 28px;
+        padding: 34px 28px 0 28px;
+        box-shadow: 0 18px 50px rgba(16, 42, 67, 0.10);
+        backdrop-filter: blur(8px);
+        display: flex;
+        flex-direction: column;
+        min-height: 720px;
+    }
+
+    .auth-pill {
+        background: #dde5f3;
+        border-radius: 999px;
+        padding: 6px;
+        display: flex;
+        gap: 6px;
+        margin: 0 auto 26px auto;
+        width: fit-content;
+    }
+
+    .auth-pill-active {
+        background: linear-gradient(135deg, #1f64ff 0%, #1456eb 100%);
+        color: white;
+        border-radius: 999px;
+        padding: 12px 28px;
+        font-weight: 800;
+    }
+
+    .auth-pill-inactive {
+        color: #4a5d7a;
+        padding: 12px 28px;
+        font-weight: 800;
     }
 
     .auth-title {
-        font-size: 2rem;
-        font-weight: 800;
+        font-size: 2.8rem;
+        line-height: 1.1;
+        font-weight: 900;
         color: #102a43;
-        margin-bottom: 0.35rem;
+        text-align: center;
+        margin-bottom: 10px;
     }
 
     .auth-subtitle {
-        color: #627d98;
-        font-size: 1rem;
-        margin-bottom: 1.2rem;
-    }
-
-    .auth-footer {
         text-align: center;
         color: #627d98;
-        font-size: 0.9rem;
-        margin-top: 1rem;
+        font-size: 1.25rem;
+        margin-bottom: 22px;
+    }
+
+    .mini-market {
+        background: #e8eefb;
+        border-radius: 20px;
+        padding: 18px 20px;
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 14px;
+        margin-bottom: 22px;
+    }
+
+    .mini-stock {
+        text-align: center;
+    }
+
+    .mini-stock-name {
+        font-size: 1.05rem;
+        font-weight: 800;
+        color: #102a43;
+    }
+
+    .mini-stock-price {
+        font-size: 1.9rem;
+        font-weight: 900;
+        color: #102a43;
+    }
+
+    .mini-stock-change-up {
+        color: #12b886;
+        font-weight: 800;
+        font-size: 1rem;
+    }
+
+    .mini-stock-change-down {
+        color: #ef4444;
+        font-weight: 800;
+        font-size: 1rem;
+    }
+
+    .auth-form-label {
+        font-size: 1rem;
+        font-weight: 800;
+        color: #344966;
+        margin-bottom: 6px;
+        margin-top: 8px;
+    }
+
+    .auth-footer-box {
+        margin-top: auto;
+        background: linear-gradient(180deg, #031b4e 0%, #02153c 100%);
+        color: white;
+        border-bottom-left-radius: 28px;
+        border-bottom-right-radius: 28px;
+        margin-left: -28px;
+        margin-right: -28px;
+        padding: 26px 28px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+    }
+
+    .auth-footer-title {
+        font-size: 1.35rem;
+        font-weight: 800;
+        margin-bottom: 4px;
+    }
+
+    .auth-footer-sub {
+        font-size: 1rem;
+        color: #c8d6ea;
+    }
+
+    .auth-lock {
+        font-size: 2rem;
+        font-weight: 800;
+    }
+
+    .auth-note {
+        text-align: center;
+        color: #627d98;
+        margin-top: 16px;
+        margin-bottom: 20px;
+        font-size: 1rem;
+    }
+
+    .stRadio > div {
+        gap: 0.5rem;
     }
 
     .stTextInput > div > div > input,
     .stPasswordInput > div > div > input {
-        border-radius: 12px !important;
+        border-radius: 14px !important;
+        padding-top: 0.9rem !important;
+        padding-bottom: 0.9rem !important;
+    }
+
+    @media (max-width: 900px) {
+        .auth-grid {
+            grid-template-columns: 1fr;
+        }
+
+        .auth-left {
+            min-height: auto;
+            padding: 24px 20px 220px 20px;
+        }
+
+        .auth-right {
+            min-height: auto;
+        }
+
+        .ticker-bar {
+            grid-template-columns: repeat(2, 1fr);
+        }
+
+        .hero-title {
+            font-size: 2.4rem;
+        }
+
+        .brand-name {
+            font-size: 2.5rem;
+        }
+
+        .auth-title {
+            font-size: 2rem;
+        }
+
+        .mini-market {
+            grid-template-columns: 1fr;
+        }
     }
 
     @media (max-width: 768px) {
@@ -355,10 +712,9 @@ st.markdown("""
         }
 
         .card,
-        .metric-card,
-        .auth-card {
+        .metric-card {
             padding: 14px;
-            border-radius: 16px;
+            border-radius: 14px;
         }
 
         .metric-value {
@@ -386,12 +742,23 @@ st.markdown("""
             width: 100%;
         }
 
-        .auth-wrap {
-            margin-top: 1rem;
+        .feature-title {
+            font-size: 1.2rem;
         }
 
-        .auth-title {
-            font-size: 1.5rem;
+        .feature-sub,
+        .hero-sub,
+        .auth-subtitle {
+            font-size: 1rem;
+        }
+
+        .hero-title {
+            font-size: 2rem;
+        }
+
+        .auth-footer-box {
+            flex-direction: column;
+            align-items: flex-start;
         }
     }
 </style>
@@ -509,21 +876,140 @@ if "page" not in st.session_state:
 # =============================
 def login_page():
     st.markdown("""
-    <div class="auth-wrap">
-        <div class="auth-card">
-            <div class="auth-badge">TradeFlow</div>
-            <div class="auth-title">Welcome back</div>
-            <div class="auth-subtitle">
-                Track your stocks, manage portfolios, and view your trading history in one place.
+    <div class="auth-shell">
+        <div class="auth-grid">
+            <div class="auth-left">
+                <div class="ticker-bar">
+                    <div class="ticker-item">AAPL <span>$192.33</span> <span class="ticker-up">▲ 1.24%</span></div>
+                    <div class="ticker-item">TSLA <span>$245.12</span> <span class="ticker-down">▼ -0.87%</span></div>
+                    <div class="ticker-item">NVDA <span>$875.44</span> <span class="ticker-up">▲ 2.58%</span></div>
+                    <div class="ticker-item">SPY <span>$528.19</span> <span class="ticker-up">▲ 0.31%</span></div>
+                </div>
+
+                <div class="brand-logo">📈</div>
+                <div class="brand-name">Trade<span>Flow</span></div>
+                <div class="brand-tag">TRACK. TRADE. GROW.</div>
+
+                <div class="hero-title">Your Portfolio.<br><span>Your Advantage.</span></div>
+                <div class="hero-sub">
+                    Track stocks, manage trades, and see your performance all in one place.
+                </div>
+
+                <div class="feature-list">
+                    <div class="feature-item">
+                        <div class="feature-icon feature-blue">📊</div>
+                        <div>
+                            <div class="feature-title">Real-Time Prices</div>
+                            <div class="feature-sub">Stay updated with live market data</div>
+                        </div>
+                    </div>
+
+                    <div class="feature-item">
+                        <div class="feature-icon feature-green">📈</div>
+                        <div>
+                            <div class="feature-title">Smart Tracking</div>
+                            <div class="feature-sub">Monitor your investments easily</div>
+                        </div>
+                    </div>
+
+                    <div class="feature-item">
+                        <div class="feature-icon feature-purple">🕘</div>
+                        <div>
+                            <div class="feature-title">Trade History</div>
+                            <div class="feature-sub">Review and learn from every move</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="auth-chart">
+                    <div class="chart-line"></div>
+                    <div class="chart-dot c1"></div>
+                    <div class="chart-dot c2"></div>
+                    <div class="chart-dot c3"></div>
+                    <div class="chart-dot c4"></div>
+                    <div class="chart-dot c5"></div>
+                    <div class="chart-dot c6"></div>
+                    <div class="chart-dot c7"></div>
+
+                    <div class="candle green ca1"></div>
+                    <div class="candle red ca2"></div>
+                    <div class="candle green ca3"></div>
+                    <div class="candle green ca4"></div>
+                    <div class="candle red ca5"></div>
+                    <div class="candle green ca6"></div>
+                    <div class="candle red ca7"></div>
+                    <div class="candle green ca8"></div>
+                    <div class="candle green ca9"></div>
+                </div>
             </div>
     """, unsafe_allow_html=True)
 
-    mode = st.radio("Account", ["Login", "Register"], horizontal=True)
-    username = st.text_input("Username", placeholder="Enter your username")
-    password = st.text_input("Password", type="password", placeholder="Enter your password")
+    mode = st.radio("Account", ["Login", "Register"], horizontal=True, label_visibility="collapsed")
+
+    st.markdown("""
+            <div class="auth-right">
+    """, unsafe_allow_html=True)
+
+    if mode == "Login":
+        st.markdown("""
+            <div class="auth-pill">
+                <div class="auth-pill-active">Login</div>
+                <div class="auth-pill-inactive">Register</div>
+            </div>
+        """, unsafe_allow_html=True)
+        title_text = "Welcome back"
+        subtitle_text = "Sign in to access your dashboard"
+    else:
+        st.markdown("""
+            <div class="auth-pill">
+                <div class="auth-pill-inactive">Login</div>
+                <div class="auth-pill-active">Register</div>
+            </div>
+        """, unsafe_allow_html=True)
+        title_text = "Create your account"
+        subtitle_text = "Start tracking your portfolio with TradeFlow"
+
+    st.markdown(f"""
+        <div class="auth-title">{title_text}</div>
+        <div class="auth-subtitle">{subtitle_text}</div>
+        <div class="mini-market">
+            <div class="mini-stock">
+                <div class="mini-stock-name">AAPL</div>
+                <div class="mini-stock-price">$192.33</div>
+                <div class="mini-stock-change-up">▲ 1.24%</div>
+            </div>
+            <div class="mini-stock">
+                <div class="mini-stock-name">TSLA</div>
+                <div class="mini-stock-price">$245.12</div>
+                <div class="mini-stock-change-down">▼ -0.87%</div>
+            </div>
+            <div class="mini-stock">
+                <div class="mini-stock-name">NVDA</div>
+                <div class="mini-stock-price">$875.44</div>
+                <div class="mini-stock-change-up">▲ 2.58%</div>
+            </div>
+        </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown('<div class="auth-form-label">USERNAME</div>', unsafe_allow_html=True)
+    username = st.text_input(
+        "Username",
+        placeholder="Enter your username",
+        label_visibility="collapsed",
+        key="auth_username"
+    )
+
+    st.markdown('<div class="auth-form-label">PASSWORD</div>', unsafe_allow_html=True)
+    password = st.text_input(
+        "Password",
+        type="password",
+        placeholder="Enter your password",
+        label_visibility="collapsed",
+        key="auth_password"
+    )
 
     if mode == "Register":
-        if st.button("Create Account"):
+        if st.button("Create Account", key="register_button"):
             if username in users:
                 st.error("User already exists")
             elif not username or not password:
@@ -543,7 +1029,7 @@ def login_page():
                 st.success("Account created. You can log in now.")
 
     if mode == "Login":
-        if st.button("Login to TradeFlow"):
+        if st.button("Login to TradeFlow", key="login_button"):
             if username in users and users[username] == hash_password(password):
                 st.session_state.logged_in = True
                 st.session_state.user = username
@@ -574,10 +1060,17 @@ def login_page():
                 st.error("Invalid login")
 
     st.markdown("""
-            <div class="auth-footer">
-                Built for simple stock tracking on desktop and phone.
+        <div class="auth-note">New to TradeFlow? Create your account and start tracking smarter.</div>
+
+        <div class="auth-footer-box">
+            <div>
+                <div class="auth-footer-title">Secure & Private</div>
+                <div class="auth-footer-sub">Your data is encrypted and protected</div>
             </div>
+            <div class="auth-lock">🔒</div>
         </div>
+    </div>
+    </div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -800,29 +1293,33 @@ else:
 
 amount = st.sidebar.number_input("Amount ($)", value=100.0)
 
-if st.sidebar.button("Add Trade") and ticker:
-    price = get_price(ticker)
-
-    if price:
-        trade = {
-            "Ticker": ticker,
-            "Amount": float(amount),
-            "Price": float(price),
-            "Shares": float(amount / price),
-            "Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        }
-
-        current_portfolio.append(trade)
-        save_current_portfolio(current_portfolio)
-        st.sidebar.success(f"Added {ticker}")
-        st.rerun()
+if st.sidebar.button("Add Trade"):
+    if not ticker:
+        st.sidebar.error("Choose a stock first.")
     else:
-        st.sidebar.error("Could not fetch price for that stock.")
+        price = get_price(ticker)
+
+        if price:
+            trade = {
+                "Ticker": ticker,
+                "Amount": float(amount),
+                "Price": float(price),
+                "Shares": float(amount / price),
+                "Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            }
+
+            current_portfolio.append(trade)
+            save_current_portfolio(current_portfolio)
+            st.sidebar.success(f"Added {ticker}")
+            st.rerun()
+        else:
+            st.sidebar.error("Could not fetch price for that stock.")
 
 if st.sidebar.button("Logout"):
     st.session_state.logged_in = False
     st.session_state.user = ""
     st.session_state.selected_portfolio = None
+    st.session_state.page = "Home"
     st.rerun()
 
 # =============================
@@ -835,10 +1332,9 @@ if st.session_state.page == "Home":
     pnl_pct = (unrealized_profit / invested * 100) if invested > 0 else 0.0
     portfolio_count = len(user_portfolios)
 
-    st.markdown(f"<div class='main-title'>Good morning, {user}!</div>", unsafe_allow_html=True)
-    st.markdown("<div class='subtitle'>Here's how your investments are doing today.</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='main-title'>Welcome back, {user}</div>", unsafe_allow_html=True)
+    st.markdown("<div class='subtitle'>Here’s how your investments are doing today.</div>", unsafe_allow_html=True)
 
-    # 2x2 grid works better on phones
     row1_col1, row1_col2 = st.columns(2)
     row2_col1, row2_col2 = st.columns(2)
 
@@ -893,7 +1389,7 @@ if st.session_state.page == "Home":
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    left, right = st.columns([1.2, 1])
+    left, right = st.columns([1.15, 0.85], gap="large")
 
     with left:
         st.markdown("<div class='card'>", unsafe_allow_html=True)
@@ -983,6 +1479,7 @@ if st.session_state.page == "Home":
         )
     else:
         st.info("No trades yet in this portfolio")
+ =============================
 
 # =============================
 # STOCK VIEWER PAGE
