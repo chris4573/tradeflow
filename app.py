@@ -134,7 +134,30 @@ if st.button("Logout"):
     st.rerun()
 
 # =============================
-# STOCK CHART VIEWER (NEW ADDITION)
+# STOCK DATA
+# =============================
+company_names = {
+    "AAPL": "Apple Inc",
+    "AMZN": "Amazon.com Inc",
+    "AMD": "Advanced Micro Devices Inc",
+    "MSFT": "Microsoft Corp",
+    "META": "Meta Platforms Inc",
+    "TSLA": "Tesla Inc",
+    "GOOGL": "Alphabet Inc",
+    "NVDA": "NVIDIA Corp",
+    "NFLX": "Netflix Inc",
+    "INTC": "Intel Corp",
+    "UBER": "Uber Technologies Inc",
+    "DIS": "Walt Disney Co",
+    "SHOP": "Shopify Inc",
+    "PYPL": "PayPal Holdings Inc",
+    "BABA": "Alibaba Group"
+}
+
+popular = list(company_names.keys())
+
+# =============================
+# STOCK CHART VIEWER (FIXED)
 # =============================
 st.subheader("📈 Stock Chart Viewer")
 
@@ -164,28 +187,6 @@ if chart_ticker:
         st.line_chart(data["Close"])
     else:
         st.error("No data found")
-# =============================
-# STOCK DATA
-# =============================
-company_names = {
-    "AAPL": "Apple Inc",
-    "AMZN": "Amazon.com Inc",
-    "AMD": "Advanced Micro Devices Inc",
-    "MSFT": "Microsoft Corp",
-    "META": "Meta Platforms Inc",
-    "TSLA": "Tesla Inc",
-    "GOOGL": "Alphabet Inc",
-    "NVDA": "NVIDIA Corp",
-    "NFLX": "Netflix Inc",
-    "INTC": "Intel Corp",
-    "UBER": "Uber Technologies Inc",
-    "DIS": "Walt Disney Co",
-    "SHOP": "Shopify Inc",
-    "PYPL": "PayPal Holdings Inc",
-    "BABA": "Alibaba Group"
-}
-
-popular = list(company_names.keys())
 
 # =============================
 # ADD TRADE
