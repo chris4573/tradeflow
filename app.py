@@ -17,14 +17,217 @@ HISTORY_FILE = "portfolio_history.json"
 SALES_FILE = "sales_history.json"
 
 # =============================
-# SECURITY
+# STYLING
+# =============================
+st.markdown("""
+<style>
+    .stApp {
+        background-color: #f4f7fb;
+    }
+
+    section[data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #031b4e 0%, #02153c 100%);
+        color: white;
+    }
+
+    section[data-testid="stSidebar"] * {
+        color: white !important;
+    }
+
+    .main-title {
+        font-size: 2rem;
+        font-weight: 700;
+        color: #102a43;
+        margin-bottom: 0.2rem;
+    }
+
+    .subtitle {
+        font-size: 1rem;
+        color: #627d98;
+        margin-bottom: 1rem;
+    }
+
+    .card {
+        background: white;
+        border-radius: 18px;
+        padding: 20px;
+        box-shadow: 0 8px 24px rgba(16, 42, 67, 0.08);
+        border: 1px solid #e6edf5;
+    }
+
+    .metric-card {
+        border-radius: 18px;
+        padding: 20px;
+        color: white;
+        min-height: 130px;
+        box-shadow: 0 8px 24px rgba(16, 42, 67, 0.12);
+    }
+
+    .metric-blue {
+        background: linear-gradient(135deg, #123d9b 0%, #0f57d5 100%);
+    }
+
+    .metric-green {
+        background: linear-gradient(135deg, #089981 0%, #12b886 100%);
+    }
+
+    .metric-white {
+        background: white;
+        color: #102a43;
+        border: 1px solid #e6edf5;
+    }
+
+    .metric-label {
+        font-size: 0.9rem;
+        font-weight: 600;
+        opacity: 0.9;
+        margin-bottom: 12px;
+    }
+
+    .metric-value {
+        font-size: 2rem;
+        font-weight: 800;
+        line-height: 1.1;
+    }
+
+    .metric-sub {
+        font-size: 1rem;
+        font-weight: 600;
+        margin-top: 10px;
+    }
+
+    .section-title {
+        font-size: 1.4rem;
+        font-weight: 700;
+        color: #102a43;
+        margin-bottom: 12px;
+    }
+
+    .portfolio-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 14px 0;
+        border-bottom: 1px solid #edf2f7;
+    }
+
+    .portfolio-left {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+    }
+
+    .portfolio-icon {
+        width: 42px;
+        height: 42px;
+        border-radius: 12px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.2rem;
+        font-weight: 700;
+        color: white;
+    }
+
+    .icon-blue { background: #2f5bea; }
+    .icon-purple { background: #7c3aed; }
+    .icon-gold { background: #d4a72c; }
+    .icon-green { background: #089981; }
+
+    .portfolio-name {
+        font-size: 1rem;
+        font-weight: 700;
+        color: #102a43;
+    }
+
+    .portfolio-meta {
+        font-size: 0.85rem;
+        color: #627d98;
+    }
+
+    .portfolio-value {
+        text-align: right;
+    }
+
+    .portfolio-money {
+        font-size: 1.1rem;
+        font-weight: 800;
+        color: #102a43;
+    }
+
+    .portfolio-pct-up {
+        font-size: 0.95rem;
+        font-weight: 700;
+        color: #12b886;
+    }
+
+    .portfolio-pct-down {
+        font-size: 0.95rem;
+        font-weight: 700;
+        color: #ef4444;
+    }
+
+    .watch-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 12px 0;
+        border-bottom: 1px solid #edf2f7;
+    }
+
+    .watch-left {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+    }
+
+    .watch-logo {
+        width: 34px;
+        height: 34px;
+        border-radius: 50%;
+        object-fit: contain;
+        background: white;
+        border: 1px solid #e6edf5;
+        padding: 3px;
+    }
+
+    .watch-name {
+        font-size: 1rem;
+        font-weight: 700;
+        color: #102a43;
+    }
+
+    .watch-sub {
+        font-size: 0.85rem;
+        color: #627d98;
+    }
+
+    .watch-price {
+        text-align: right;
+        font-weight: 800;
+        color: #102a43;
+    }
+
+    .watch-change-up {
+        color: #12b886;
+        font-size: 0.9rem;
+        font-weight: 700;
+    }
+
+    .watch-change-down {
+        color: #ef4444;
+        font-size: 0.9rem;
+        font-weight: 700;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# =============================
+# HELPERS
 # =============================
 def hash_password(password):
     return hashlib.sha256(password.encode("utf-8")).hexdigest()
 
-# =============================
-# LOAD / SAVE HELPERS
-# =============================
 def load_json(path, default):
     if os.path.exists(path):
         with open(path, "r", encoding="utf-8") as f:
@@ -40,9 +243,6 @@ portfolios = load_json(PORTFOLIO_FILE, {})
 history = load_json(HISTORY_FILE, {})
 sales_history = load_json(SALES_FILE, {})
 
-# =============================
-# PRICE FETCH
-# =============================
 @st.cache_data(ttl=60)
 def get_price(ticker):
     try:
@@ -53,9 +253,20 @@ def get_price(ticker):
     except Exception:
         return None
 
-# =============================
-# STOCK UNIVERSE
-# =============================
+@st.cache_data(ttl=300)
+def get_price_and_change(ticker):
+    try:
+        data = yf.Ticker(ticker).history(period="5d")
+        if data.empty:
+            return None, None
+        close = data["Close"].dropna()
+        current = float(close.iloc[-1])
+        previous = float(close.iloc[-2]) if len(close) > 1 else current
+        pct_change = ((current - previous) / previous) * 100 if previous else 0
+        return current, pct_change
+    except Exception:
+        return None, None
+
 @st.cache_data(ttl=86400)
 def load_stock_universe():
     nasdaq_url = "https://www.nasdaqtrader.com/dynamic/symdir/nasdaqlisted.txt"
@@ -87,8 +298,27 @@ def load_stock_universe():
 stocks_df = load_stock_universe()
 company_names = dict(zip(stocks_df["Ticker"], stocks_df["Name"]))
 
+logo_domains = {
+    "AAPL": "apple.com",
+    "TSLA": "tesla.com",
+    "NVDA": "nvidia.com",
+    "GOOGL": "google.com",
+    "MSFT": "microsoft.com",
+    "AMZN": "amazon.com",
+    "META": "meta.com",
+    "NFLX": "netflix.com",
+    "UBER": "uber.com",
+    "SPOT": "spotify.com"
+}
+
+def get_logo_url(ticker):
+    domain = logo_domains.get(ticker)
+    if domain:
+        return f"https://logo.clearbit.com/{domain}"
+    return None
+
 # =============================
-# SESSION STATE
+# SESSION
 # =============================
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
@@ -96,9 +326,11 @@ if "user" not in st.session_state:
     st.session_state.user = ""
 if "selected_portfolio" not in st.session_state:
     st.session_state.selected_portfolio = None
+if "page" not in st.session_state:
+    st.session_state.page = "Home"
 
 # =============================
-# LOGIN SYSTEM
+# LOGIN
 # =============================
 def login_page():
     st.title("TradeFlow Login")
@@ -117,14 +349,12 @@ def login_page():
                 users[username] = hash_password(password)
                 save_json(USERS_FILE, users)
 
-                # create empty portfolio structure for new user
                 portfolios[username] = {"Main": []}
-                save_json(PORTFOLIO_FILE, portfolios)
-
                 history[username] = {"Main": []}
-                save_json(HISTORY_FILE, history)
-
                 sales_history[username] = {"Main": []}
+
+                save_json(PORTFOLIO_FILE, portfolios)
+                save_json(HISTORY_FILE, history)
                 save_json(SALES_FILE, sales_history)
 
                 st.success("Account created")
@@ -135,7 +365,6 @@ def login_page():
                 st.session_state.logged_in = True
                 st.session_state.user = username
 
-                # migrate old data if needed
                 if username not in portfolios:
                     portfolios[username] = {"Main": []}
                 elif isinstance(portfolios[username], list):
@@ -157,7 +386,6 @@ def login_page():
 
                 portfolio_names = list(portfolios[username].keys())
                 st.session_state.selected_portfolio = portfolio_names[0] if portfolio_names else "Main"
-
                 st.rerun()
             else:
                 st.error("Invalid login")
@@ -204,10 +432,8 @@ def get_current_history():
 def save_current_history(updated_history):
     user = st.session_state.user
     current_name = st.session_state.selected_portfolio
-
     if user not in history:
         history[user] = {}
-
     history[user][current_name] = updated_history
     save_json(HISTORY_FILE, history)
 
@@ -225,16 +451,11 @@ def get_current_sales():
 def save_current_sales(updated_sales):
     user = st.session_state.user
     current_name = st.session_state.selected_portfolio
-
     if user not in sales_history:
         sales_history[user] = {}
-
     sales_history[user][current_name] = updated_sales
     save_json(SALES_FILE, sales_history)
 
-# =============================
-# PORTFOLIO CALCS
-# =============================
 def get_portfolio_value(portfolio):
     total = 0.0
     for trade in portfolio:
@@ -272,6 +493,19 @@ def build_portfolio_df(portfolio):
 
     return pd.DataFrame(rows)
 
+def update_history_snapshot():
+    current_history = get_current_history()
+    current_portfolio = get_current_portfolio()
+    current_value_now = get_portfolio_value(current_portfolio)
+    now_key = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    if not current_history or current_history[-1]["time"] != now_key:
+        current_history.append({
+            "time": now_key,
+            "value": current_value_now
+        })
+        save_current_history(current_history)
+
 # =============================
 # APP START
 # =============================
@@ -285,23 +519,36 @@ user_portfolios = get_user_portfolios(user)
 if not st.session_state.selected_portfolio or st.session_state.selected_portfolio not in user_portfolios:
     st.session_state.selected_portfolio = list(user_portfolios.keys())[0]
 
+update_history_snapshot()
+current_portfolio = get_current_portfolio()
+portfolio_df = build_portfolio_df(current_portfolio)
+
 # =============================
-# SIDEBAR - PORTFOLIOS
+# SIDEBAR
 # =============================
-st.sidebar.header("Portfolios")
+st.sidebar.markdown("## TradeFlow")
+
+page = st.sidebar.radio(
+    "Navigation",
+    ["Home", "Stock Viewer", "Manage Trades", "History"],
+    index=["Home", "Stock Viewer", "Manage Trades", "History"].index(st.session_state.page)
+)
+st.session_state.page = page
+
+st.sidebar.markdown("---")
+st.sidebar.markdown("### Portfolios")
 
 portfolio_names = list(user_portfolios.keys())
-
 selected_portfolio = st.sidebar.radio(
     "Select Portfolio",
     portfolio_names,
     index=portfolio_names.index(st.session_state.selected_portfolio)
 )
-
 st.session_state.selected_portfolio = selected_portfolio
+current_portfolio = get_current_portfolio()
+portfolio_df = build_portfolio_df(current_portfolio)
 
 new_portfolio_name = st.sidebar.text_input("New Portfolio Name").strip()
-
 if st.sidebar.button("Create Portfolio"):
     if not new_portfolio_name:
         st.sidebar.error("Enter a portfolio name")
@@ -326,169 +573,8 @@ if st.sidebar.button("Create Portfolio"):
         st.sidebar.success(f"Created {new_portfolio_name}")
         st.rerun()
 
-current_portfolio = get_current_portfolio()
-
-# =============================
-# HEADER
-# =============================
-st.title("TradeFlow")
-st.write(f"Welcome {user}")
-st.write(f"Current portfolio: **{st.session_state.selected_portfolio}**")
-
-if st.button("Logout"):
-    st.session_state.logged_in = False
-    st.session_state.user = ""
-    st.session_state.selected_portfolio = None
-    st.rerun()
-
-# =============================
-# STOCK VIEWER + BUY/SELL
-# =============================
-st.subheader("Stock Viewer")
-
-chart_search = st.text_input("Search stock (e.g. Tesla or AAPL)")
-chart_matches = pd.DataFrame()
-
-if chart_search and not stocks_df.empty:
-    q = chart_search.strip().upper()
-    chart_matches = stocks_df[
-        stocks_df["Ticker"].str.contains(q, na=False) |
-        stocks_df["Name"].str.upper().str.contains(q, na=False)
-    ].head(25)
-
-if not chart_matches.empty:
-    chart_options = [f"{row.Ticker} - {row.Name}" for _, row in chart_matches.iterrows()]
-    chart_selection = st.selectbox("Choose stock", chart_options)
-    chart_ticker = chart_selection.split(" - ", 1)[0].strip()
-    chart_name = company_names.get(chart_ticker, chart_ticker)
-
-    chart_data = yf.Ticker(chart_ticker).history(period="6mo")
-    current_price = get_price(chart_ticker)
-
-    st.write(f"Showing: {chart_ticker} - {chart_name}")
-
-    if not chart_data.empty:
-        st.line_chart(chart_data["Close"])
-    else:
-        st.error("No chart data found.")
-
-    if current_price is not None:
-        st.write(f"Current price: ${current_price:.2f}")
-
-        buy_col, sell_col = st.columns(2)
-
-        with buy_col:
-            st.markdown("### Buy")
-            buy_amount = st.number_input(
-                f"Buy amount for {chart_ticker} ($)",
-                min_value=1.0,
-                value=100.0,
-                step=10.0,
-                key=f"buy_amount_{chart_ticker}"
-            )
-
-            if st.button(f"Buy {chart_ticker}", key=f"buy_btn_{chart_ticker}"):
-                buy_trade = {
-                    "Ticker": chart_ticker,
-                    "Amount": float(buy_amount),
-                    "Price": float(current_price),
-                    "Shares": float(buy_amount / current_price),
-                    "Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                }
-
-                current_portfolio.append(buy_trade)
-                save_current_portfolio(current_portfolio)
-
-                st.success(f"Bought {chart_ticker} for ${buy_amount:.2f}")
-                st.rerun()
-
-        with sell_col:
-            st.markdown("### Sell")
-
-            owned_trades = [
-                (i, t) for i, t in enumerate(current_portfolio)
-                if t["Ticker"] == chart_ticker
-            ]
-
-            if owned_trades:
-                sell_options = [
-                    f"ID {i} | {t['Shares']:.4f} shares | bought at ${t['Price']:.2f} | {t.get('Time', 'Older trade')}"
-                    for i, t in owned_trades
-                ]
-
-                selected_sell = st.selectbox(
-                    f"Select {chart_ticker} trade to sell",
-                    sell_options,
-                    key=f"sell_select_{chart_ticker}"
-                )
-
-                selected_id = int(selected_sell.split("|")[0].replace("ID", "").strip())
-                selected_trade = current_portfolio[selected_id]
-                max_shares = float(selected_trade["Shares"])
-
-                sell_shares = st.number_input(
-                    f"Shares to sell ({chart_ticker})",
-                    min_value=0.0001,
-                    max_value=max_shares,
-                    value=max_shares,
-                    step=0.0001,
-                    format="%.4f",
-                    key=f"sell_shares_{chart_ticker}"
-                )
-
-                estimated_sale_value = sell_shares * current_price
-                estimated_cost_basis = sell_shares * float(selected_trade["Price"])
-                estimated_pl = estimated_sale_value - estimated_cost_basis
-
-                st.write(f"Sale value: ${estimated_sale_value:.2f}")
-
-                if estimated_pl >= 0:
-                    st.success(f"Estimated profit: ${estimated_pl:.2f}")
-                else:
-                    st.error(f"Estimated loss: ${abs(estimated_pl):.2f}")
-
-                if st.button(f"Sell {chart_ticker}", key=f"sell_btn_{chart_ticker}"):
-                    realized_sale_value = sell_shares * current_price
-                    realized_cost_basis = sell_shares * float(selected_trade["Price"])
-                    realized_pl = realized_sale_value - realized_cost_basis
-
-                    sale_record = {
-                        "Ticker": chart_ticker,
-                        "Shares Sold": round(sell_shares, 4),
-                        "Sell Price": round(current_price, 2),
-                        "Sale Value": round(realized_sale_value, 2),
-                        "Cost Basis": round(realized_cost_basis, 2),
-                        "Realized P/L": round(realized_pl, 2),
-                        "Sold At": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    }
-
-                    remaining_shares = selected_trade["Shares"] - sell_shares
-
-                    if remaining_shares <= 0.0000001:
-                        current_portfolio.pop(selected_id)
-                    else:
-                        current_portfolio[selected_id]["Shares"] = remaining_shares
-                        current_portfolio[selected_id]["Amount"] = remaining_shares * float(selected_trade["Price"])
-
-                    save_current_portfolio(current_portfolio)
-
-                    current_sales = get_current_sales()
-                    current_sales.append(sale_record)
-                    save_current_sales(current_sales)
-
-                    st.success(f"Sold {sell_shares:.4f} shares of {chart_ticker}")
-                    st.rerun()
-            else:
-                st.info(f"You do not own any {chart_ticker} trades in this portfolio.")
-    else:
-        st.error("Could not fetch current price.")
-elif chart_search:
-    st.warning("No matching stocks found.")
-
-# =============================
-# SIDEBAR - ADD TRADE
-# =============================
-st.sidebar.header("Quick Add Trade")
+st.sidebar.markdown("---")
+st.sidebar.markdown("### Quick Add Trade")
 
 search = st.sidebar.text_input("Search Stock").strip()
 matches_df = pd.DataFrame()
@@ -537,162 +623,424 @@ if st.sidebar.button("Add Trade") and ticker:
 
         current_portfolio.append(trade)
         save_current_portfolio(current_portfolio)
-
         st.sidebar.success(f"Added {ticker}")
         st.rerun()
     else:
         st.sidebar.error("Could not fetch price for that stock.")
 
+if st.sidebar.button("Logout"):
+    st.session_state.logged_in = False
+    st.session_state.user = ""
+    st.session_state.selected_portfolio = None
+    st.rerun()
+
 # =============================
-# PORTFOLIO DISPLAY
+# HOME PAGE
 # =============================
-st.subheader("Portfolio")
-
-portfolio_df = build_portfolio_df(current_portfolio)
-
-if not portfolio_df.empty:
-    st.dataframe(portfolio_df, use_container_width=True)
-
-    invested = float(portfolio_df["Amount"].sum())
-    current_value = float(portfolio_df["Market Value"].fillna(0).sum())
+if st.session_state.page == "Home":
+    invested = float(portfolio_df["Amount"].sum()) if not portfolio_df.empty else 0.0
+    current_value = float(portfolio_df["Market Value"].fillna(0).sum()) if not portfolio_df.empty else 0.0
     unrealized_profit = current_value - invested
+    pnl_pct = (unrealized_profit / invested * 100) if invested > 0 else 0.0
+    portfolio_count = len(user_portfolios)
 
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Invested", f"${invested:,.2f}")
-    col2.metric("Current Value", f"${current_value:,.2f}")
-    col3.metric("Unrealized P/L", f"${unrealized_profit:,.2f}")
-else:
-    st.info("No trades yet in this portfolio")
+    st.markdown(f"<div class='main-title'>Good morning, {user}!</div>", unsafe_allow_html=True)
+    st.markdown("<div class='subtitle'>Here's how your investments are doing today.</div>", unsafe_allow_html=True)
 
-# =============================
-# MANAGE TRADES
-# =============================
-st.subheader("Manage Trades")
-
-if not portfolio_df.empty:
-    trade_labels = [
-        f"ID {row['ID']} | {row['Ticker']} | {row['Shares']:.4f} shares | bought {row['Time']}"
-        for _, row in portfolio_df.iterrows()
-    ]
-
-    selected_label = st.selectbox("Select a trade", trade_labels)
-    selected_id = int(selected_label.split("|")[0].replace("ID", "").strip())
-    selected_trade = current_portfolio[selected_id]
-    selected_current_price = get_price(selected_trade["Ticker"]) or 0.0
-
-    c1, c2 = st.columns(2)
+    c1, c2, c3, c4 = st.columns(4)
 
     with c1:
-        st.markdown("### Delete Trade")
-        if st.button("Delete Selected Trade"):
-            deleted = current_portfolio.pop(selected_id)
-            save_current_portfolio(current_portfolio)
-            st.success(f"Deleted {deleted['Ticker']} trade")
-            st.rerun()
+        st.markdown(f"""
+        <div class="metric-card metric-blue">
+            <div class="metric-label">INVESTED</div>
+            <div class="metric-value">${invested:,.2f}</div>
+        </div>
+        """, unsafe_allow_html=True)
 
     with c2:
-        st.markdown("### Sell Trade")
-        max_shares = float(selected_trade["Shares"])
-        sell_shares = st.number_input(
-            "Shares to sell",
-            min_value=0.0001,
-            max_value=max_shares,
-            value=max_shares,
-            step=0.0001,
-            format="%.4f",
-            key=f"manage_sell_{selected_id}"
-        )
+        st.markdown(f"""
+        <div class="metric-card metric-green">
+            <div class="metric-label">CURRENT VALUE</div>
+            <div class="metric-value">${current_value:,.2f}</div>
+        </div>
+        """, unsafe_allow_html=True)
 
-        avg_buy_price = float(selected_trade["Price"])
-        estimated_sale_value = sell_shares * selected_current_price
-        estimated_cost_basis = sell_shares * avg_buy_price
-        estimated_pl = estimated_sale_value - estimated_cost_basis
+    with c3:
+        color_class = "metric-white"
+        pnl_sign = "+" if unrealized_profit >= 0 else ""
+        pct_sign = "+" if pnl_pct >= 0 else ""
+        st.markdown(f"""
+        <div class="metric-card {color_class}">
+            <div class="metric-label">PROFIT / LOSS</div>
+            <div class="metric-value">{pnl_sign}${unrealized_profit:,.2f}</div>
+            <div class="metric-sub">{pct_sign}{pnl_pct:.2f}%</div>
+        </div>
+        """, unsafe_allow_html=True)
 
-        st.write(f"Current price: ${selected_current_price:.2f}")
-        st.write(f"Estimated sale value: ${estimated_sale_value:.2f}")
+    with c4:
+        st.markdown(f"""
+        <div class="metric-card metric-blue">
+            <div class="metric-label">PORTFOLIOS</div>
+            <div class="metric-value">{portfolio_count}</div>
+        </div>
+        """, unsafe_allow_html=True)
 
-        if estimated_pl >= 0:
-            st.success(f"Estimated realized profit: ${estimated_pl:.2f}")
-        else:
-            st.error(f"Estimated realized loss: ${abs(estimated_pl):.2f}")
+    st.markdown("<br>", unsafe_allow_html=True)
 
-        if st.button("Sell Selected Shares"):
-            realized_sale_value = sell_shares * selected_current_price
-            realized_cost_basis = sell_shares * avg_buy_price
-            realized_pl = realized_sale_value - realized_cost_basis
+    hist_data = get_current_history()
+    hist_df = pd.DataFrame(hist_data)
 
-            sale_record = {
-                "Ticker": selected_trade["Ticker"],
-                "Shares Sold": round(sell_shares, 4),
-                "Sell Price": round(selected_current_price, 2),
-                "Sale Value": round(realized_sale_value, 2),
-                "Cost Basis": round(realized_cost_basis, 2),
-                "Realized P/L": round(realized_pl, 2),
-                "Sold At": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            }
-
-            remaining_shares = selected_trade["Shares"] - sell_shares
-            if remaining_shares <= 0.0000001:
-                current_portfolio.pop(selected_id)
-            else:
-                current_portfolio[selected_id]["Shares"] = remaining_shares
-                current_portfolio[selected_id]["Amount"] = remaining_shares * avg_buy_price
-
-            save_current_portfolio(current_portfolio)
-
-            current_sales = get_current_sales()
-            current_sales.append(sale_record)
-            save_current_sales(current_sales)
-
-            st.success(f"Sold {sell_shares:.4f} shares of {selected_trade['Ticker']}")
-            st.rerun()
-else:
-    st.info("Add trades to manage them")
-
-# =============================
-# SALES HISTORY
-# =============================
-st.subheader("Sales History")
-
-current_sales = get_current_sales()
-if current_sales:
-    sales_df = pd.DataFrame(current_sales)
-    st.dataframe(sales_df, use_container_width=True)
-
-    total_realized = float(sales_df["Realized P/L"].sum())
-    if total_realized >= 0:
-        st.success(f"Total Realized Profit/Loss: ${total_realized:.2f}")
+    st.markdown("<div class='card'>", unsafe_allow_html=True)
+    st.markdown("<div class='section-title'>Portfolio Overview</div>", unsafe_allow_html=True)
+    if not hist_df.empty:
+        st.line_chart(hist_df.set_index("time")["value"], use_container_width=True)
     else:
-        st.error(f"Total Realized Profit/Loss: ${total_realized:.2f}")
-else:
-    st.info("No sales yet in this portfolio")
+        st.info("No portfolio history yet")
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    left, right = st.columns([1.2, 1])
+
+    with left:
+        st.markdown("<div class='card'>", unsafe_allow_html=True)
+        st.markdown("<div class='section-title'>Your Portfolios</div>", unsafe_allow_html=True)
+
+        icon_classes = ["icon-blue", "icon-purple", "icon-gold", "icon-green"]
+
+        for i, (p_name, p_trades) in enumerate(user_portfolios.items()):
+            p_df = build_portfolio_df(p_trades)
+            p_invested = float(p_df["Amount"].sum()) if not p_df.empty else 0.0
+            p_current = float(p_df["Market Value"].fillna(0).sum()) if not p_df.empty else 0.0
+            p_profit = p_current - p_invested
+            p_pct = (p_profit / p_invested * 100) if p_invested > 0 else 0.0
+            holdings = len(p_trades)
+
+            pct_class = "portfolio-pct-up" if p_pct >= 0 else "portfolio-pct-down"
+            pct_sign = "+" if p_pct >= 0 else ""
+            money_sign = "+" if p_profit >= 0 else ""
+
+            st.markdown(f"""
+            <div class="portfolio-row">
+                <div class="portfolio-left">
+                    <div class="portfolio-icon {icon_classes[i % len(icon_classes)]}">
+                        {p_name[:1].upper()}
+                    </div>
+                    <div>
+                        <div class="portfolio-name">{p_name}</div>
+                        <div class="portfolio-meta">{holdings} holdings</div>
+                    </div>
+                </div>
+                <div class="portfolio-value">
+                    <div class="portfolio-money">${p_current:,.2f}</div>
+                    <div class="{pct_class}">{money_sign}${p_profit:,.2f} • {pct_sign}{p_pct:.2f}%</div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    with right:
+        st.markdown("<div class='card'>", unsafe_allow_html=True)
+        st.markdown("<div class='section-title'>Watchlist</div>", unsafe_allow_html=True)
+
+        watchlist = ["AAPL", "TSLA", "NVDA", "GOOGL", "MSFT"]
+
+        for ticker in watchlist:
+            price, change = get_price_and_change(ticker)
+            name = company_names.get(ticker, ticker)
+            logo_url = get_logo_url(ticker)
+            change_class = "watch-change-up" if (change is not None and change >= 0) else "watch-change-down"
+            change_sign = "+" if (change is not None and change >= 0) else ""
+
+            logo_html = f"<img class='watch-logo' src='{logo_url}'>" if logo_url else f"<div class='watch-logo'>{ticker[:1]}</div>"
+
+            st.markdown(f"""
+            <div class="watch-row">
+                <div class="watch-left">
+                    {logo_html}
+                    <div>
+                        <div class="watch-name">{ticker}</div>
+                        <div class="watch-sub">{name}</div>
+                    </div>
+                </div>
+                <div class="watch-price">
+                    <div>${price:,.2f}</div>
+                    <div class="{change_class}">{change_sign}{change:.2f}%</div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    st.subheader("Recent Trades")
+    if not portfolio_df.empty:
+        recent_df = portfolio_df.sort_values("Time", ascending=False).head(8)
+        st.dataframe(
+            recent_df[["Ticker", "Name", "Shares", "Buy Price", "Amount", "Time"]],
+            use_container_width=True
+        )
+    else:
+        st.info("No trades yet in this portfolio")
 
 # =============================
-# MARKET WATCH
+# STOCK VIEWER PAGE
 # =============================
-st.subheader("Market Watch")
+elif st.session_state.page == "Stock Viewer":
+    st.subheader("Stock Viewer")
 
-watchlist = ["AAPL", "MSFT", "TSLA", "NVDA", "AMZN", "GOOGL", "META"]
-for t in watchlist:
-    price = get_price(t)
-    name = company_names.get(t, t)
-    if price:
-        st.write(f"{t} - {name}: ${price:.2f}")
+    chart_search = st.text_input("Search stock (e.g. Tesla or AAPL)")
+    chart_matches = pd.DataFrame()
+
+    if chart_search and not stocks_df.empty:
+        q = chart_search.strip().upper()
+        chart_matches = stocks_df[
+            stocks_df["Ticker"].str.contains(q, na=False) |
+            stocks_df["Name"].str.upper().str.contains(q, na=False)
+        ].head(25)
+
+    if not chart_matches.empty:
+        chart_options = [f"{row.Ticker} - {row.Name}" for _, row in chart_matches.iterrows()]
+        chart_selection = st.selectbox("Choose stock", chart_options)
+        chart_ticker = chart_selection.split(" - ", 1)[0].strip()
+        chart_name = company_names.get(chart_ticker, chart_ticker)
+
+        chart_data = yf.Ticker(chart_ticker).history(period="6mo")
+        current_price = get_price(chart_ticker)
+
+        st.write(f"Showing: {chart_ticker} - {chart_name}")
+
+        if not chart_data.empty:
+            st.line_chart(chart_data["Close"])
+        else:
+            st.error("No chart data found.")
+
+        if current_price is not None:
+            st.write(f"Current price: ${current_price:.2f}")
+
+            buy_col, sell_col = st.columns(2)
+
+            with buy_col:
+                st.markdown("### Buy")
+                buy_amount = st.number_input(
+                    f"Buy amount for {chart_ticker} ($)",
+                    min_value=1.0,
+                    value=100.0,
+                    step=10.0,
+                    key=f"buy_amount_{chart_ticker}"
+                )
+
+                if st.button(f"Buy {chart_ticker}", key=f"buy_btn_{chart_ticker}"):
+                    buy_trade = {
+                        "Ticker": chart_ticker,
+                        "Amount": float(buy_amount),
+                        "Price": float(current_price),
+                        "Shares": float(buy_amount / current_price),
+                        "Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    }
+
+                    current_portfolio.append(buy_trade)
+                    save_current_portfolio(current_portfolio)
+                    st.success(f"Bought {chart_ticker} for ${buy_amount:.2f}")
+                    st.rerun()
+
+            with sell_col:
+                st.markdown("### Sell")
+
+                owned_trades = [
+                    (i, t) for i, t in enumerate(current_portfolio)
+                    if t["Ticker"] == chart_ticker
+                ]
+
+                if owned_trades:
+                    sell_options = [
+                        f"ID {i} | {t['Shares']:.4f} shares | bought at ${t['Price']:.2f} | {t.get('Time', 'Older trade')}"
+                        for i, t in owned_trades
+                    ]
+
+                    selected_sell = st.selectbox(
+                        f"Select {chart_ticker} trade to sell",
+                        sell_options,
+                        key=f"sell_select_{chart_ticker}"
+                    )
+
+                    selected_id = int(selected_sell.split("|")[0].replace("ID", "").strip())
+                    selected_trade = current_portfolio[selected_id]
+                    max_shares = float(selected_trade["Shares"])
+
+                    sell_shares = st.number_input(
+                        f"Shares to sell ({chart_ticker})",
+                        min_value=0.0001,
+                        max_value=max_shares,
+                        value=max_shares,
+                        step=0.0001,
+                        format="%.4f",
+                        key=f"sell_shares_{chart_ticker}"
+                    )
+
+                    estimated_sale_value = sell_shares * current_price
+                    estimated_cost_basis = sell_shares * float(selected_trade["Price"])
+                    estimated_pl = estimated_sale_value - estimated_cost_basis
+
+                    st.write(f"Sale value: ${estimated_sale_value:.2f}")
+
+                    if estimated_pl >= 0:
+                        st.success(f"Estimated profit: ${estimated_pl:.2f}")
+                    else:
+                        st.error(f"Estimated loss: ${abs(estimated_pl):.2f}")
+
+                    if st.button(f"Sell {chart_ticker}", key=f"sell_btn_{chart_ticker}"):
+                        realized_sale_value = sell_shares * current_price
+                        realized_cost_basis = sell_shares * float(selected_trade["Price"])
+                        realized_pl = realized_sale_value - realized_cost_basis
+
+                        sale_record = {
+                            "Ticker": chart_ticker,
+                            "Shares Sold": round(sell_shares, 4),
+                            "Sell Price": round(current_price, 2),
+                            "Sale Value": round(realized_sale_value, 2),
+                            "Cost Basis": round(realized_cost_basis, 2),
+                            "Realized P/L": round(realized_pl, 2),
+                            "Sold At": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        }
+
+                        remaining_shares = selected_trade["Shares"] - sell_shares
+
+                        if remaining_shares <= 0.0000001:
+                            current_portfolio.pop(selected_id)
+                        else:
+                            current_portfolio[selected_id]["Shares"] = remaining_shares
+                            current_portfolio[selected_id]["Amount"] = remaining_shares * float(selected_trade["Price"])
+
+                        save_current_portfolio(current_portfolio)
+
+                        current_sales = get_current_sales()
+                        current_sales.append(sale_record)
+                        save_current_sales(current_sales)
+
+                        st.success(f"Sold {sell_shares:.4f} shares of {chart_ticker}")
+                        st.rerun()
+                else:
+                    st.info(f"You do not own any {chart_ticker} trades in this portfolio.")
+        else:
+            st.error("Could not fetch current price.")
+    elif chart_search:
+        st.warning("No matching stocks found.")
 
 # =============================
-# PORTFOLIO HISTORY
+# MANAGE TRADES PAGE
 # =============================
-st.subheader("Portfolio History")
+elif st.session_state.page == "Manage Trades":
+    st.subheader(f"Manage Trades - {st.session_state.selected_portfolio}")
 
-current_history = get_current_history()
-current_value_now = get_portfolio_value(current_portfolio)
+    if not portfolio_df.empty:
+        st.dataframe(portfolio_df, use_container_width=True)
 
-current_history.append({
-    "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-    "value": current_value_now
-})
-save_current_history(current_history)
+        trade_labels = [
+            f"ID {row['ID']} | {row['Ticker']} | {row['Shares']:.4f} shares | bought {row['Time']}"
+            for _, row in portfolio_df.iterrows()
+        ]
 
-df_hist = pd.DataFrame(current_history)
-if not df_hist.empty:
-    st.line_chart(df_hist.set_index("time")["value"])
+        selected_label = st.selectbox("Select a trade", trade_labels)
+        selected_id = int(selected_label.split("|")[0].replace("ID", "").strip())
+        selected_trade = current_portfolio[selected_id]
+        selected_current_price = get_price(selected_trade["Ticker"]) or 0.0
+
+        c1, c2 = st.columns(2)
+
+        with c1:
+            st.markdown("### Delete Trade")
+            if st.button("Delete Selected Trade"):
+                deleted = current_portfolio.pop(selected_id)
+                save_current_portfolio(current_portfolio)
+                st.success(f"Deleted {deleted['Ticker']} trade")
+                st.rerun()
+
+        with c2:
+            st.markdown("### Sell Trade")
+            max_shares = float(selected_trade["Shares"])
+            sell_shares = st.number_input(
+                "Shares to sell",
+                min_value=0.0001,
+                max_value=max_shares,
+                value=max_shares,
+                step=0.0001,
+                format="%.4f",
+                key=f"manage_sell_{selected_id}"
+            )
+
+            avg_buy_price = float(selected_trade["Price"])
+            estimated_sale_value = sell_shares * selected_current_price
+            estimated_cost_basis = sell_shares * avg_buy_price
+            estimated_pl = estimated_sale_value - estimated_cost_basis
+
+            st.write(f"Current price: ${selected_current_price:.2f}")
+            st.write(f"Estimated sale value: ${estimated_sale_value:.2f}")
+
+            if estimated_pl >= 0:
+                st.success(f"Estimated realized profit: ${estimated_pl:.2f}")
+            else:
+                st.error(f"Estimated realized loss: ${abs(estimated_pl):.2f}")
+
+            if st.button("Sell Selected Shares"):
+                realized_sale_value = sell_shares * selected_current_price
+                realized_cost_basis = sell_shares * avg_buy_price
+                realized_pl = realized_sale_value - realized_cost_basis
+
+                sale_record = {
+                    "Ticker": selected_trade["Ticker"],
+                    "Shares Sold": round(sell_shares, 4),
+                    "Sell Price": round(selected_current_price, 2),
+                    "Sale Value": round(realized_sale_value, 2),
+                    "Cost Basis": round(realized_cost_basis, 2),
+                    "Realized P/L": round(realized_pl, 2),
+                    "Sold At": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                }
+
+                remaining_shares = selected_trade["Shares"] - sell_shares
+                if remaining_shares <= 0.0000001:
+                    current_portfolio.pop(selected_id)
+                else:
+                    current_portfolio[selected_id]["Shares"] = remaining_shares
+                    current_portfolio[selected_id]["Amount"] = remaining_shares * avg_buy_price
+
+                save_current_portfolio(current_portfolio)
+
+                current_sales = get_current_sales()
+                current_sales.append(sale_record)
+                save_current_sales(current_sales)
+
+                st.success(f"Sold {sell_shares:.4f} shares of {selected_trade['Ticker']}")
+                st.rerun()
+    else:
+        st.info("No trades yet in this portfolio")
+
+# =============================
+# HISTORY PAGE
+# =============================
+elif st.session_state.page == "History":
+    st.subheader(f"History - {st.session_state.selected_portfolio}")
+
+    current_sales = get_current_sales()
+    if current_sales:
+        st.markdown("### Sales History")
+        sales_df = pd.DataFrame(current_sales)
+        st.dataframe(sales_df, use_container_width=True)
+
+        total_realized = float(sales_df["Realized P/L"].sum())
+        if total_realized >= 0:
+            st.success(f"Total Realized Profit/Loss: ${total_realized:.2f}")
+        else:
+            st.error(f"Total Realized Profit/Loss: ${total_realized:.2f}")
+    else:
+        st.info("No sales yet in this portfolio")
+
+    st.markdown("### Portfolio History")
+    current_history = get_current_history()
+    df_hist = pd.DataFrame(current_history)
+    if not df_hist.empty:
+        st.line_chart(df_hist.set_index("time")["value"])
+    else:
+        st.info("No portfolio history yet")
