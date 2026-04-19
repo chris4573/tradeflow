@@ -138,16 +138,32 @@ if st.button("Logout"):
 # =============================
 st.subheader("📈 Stock Chart Viewer")
 
-chart_ticker = st.text_input("Enter ticker for chart (e.g. AAPL)")
+search_input = st.text_input("Search stock (e.g. Tesla or AAPL)").upper()
+
+ticker_map = {v.upper(): k for k, v in company_names.items()}
+
+chart_ticker = None
+
+if search_input:
+    if search_input in company_names:
+        chart_ticker = search_input
+    elif search_input in ticker_map:
+        chart_ticker = ticker_map[search_input]
+    else:
+        for name, ticker in ticker_map.items():
+            if search_input in name:
+                chart_ticker = ticker
+                break
 
 if chart_ticker:
     data = yf.Ticker(chart_ticker).history(period="6mo")
 
+    st.write(f"Showing: {chart_ticker} ({company_names.get(chart_ticker)})")
+
     if not data.empty:
         st.line_chart(data["Close"])
     else:
-        st.error("No data found for this ticker")
-
+        st.error("No data found")
 # =============================
 # STOCK DATA
 # =============================
