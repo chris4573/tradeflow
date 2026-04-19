@@ -80,6 +80,44 @@ def get_price(ticker):
         return None
 
 # =============================
+# LOAD LARGE STOCK UNIVERSE
+# =============================
+@st.cache_data(ttl=86400)
+def load_stock_universe():
+    nasdaq_url = "https://www.nasdaqtrader.com/dynamic/symdir/nasdaqlisted.txt"
+    other_url = "https://www.nasdaqtrader.com/dynamic/symdir/otherlisted.txt"
+
+    try:
+        nasdaq_df = pd.read_csv(nasdaq_url, sep="|")
+        other_df = pd.read_csv(other_url, sep="|")
+
+        nasdaq_df = nasdaq_df[nasdaq_df["Symbol"] != "File Creation Time"]
+        other_df = other_df[other_df["ACT Symbol"] != "File Creation Time"]
+
+        nasdaq_df = nasdaq_df[["Symbol", "Security Name"]].copy()
+        nasdaq_df.columns = ["Ticker", "Name"]
+
+        other_df = other_df[["ACT Symbol", "Security Name"]].copy()
+        other_df.columns = ["Ticker", "Name"]
+
+        stocks_df = pd.concat([nasdaq_df, other_df], ignore_index=True)
+
+        stocks_df["Ticker"] = stocks_df["Ticker"].astype(str).str.upper().str.strip()
+        stocks_df["Name"] = stocks_df["Name"].astype(str).str.strip()
+
+        stocks_df = stocks_df.drop_duplicates(subset=["Ticker"])
+        stocks_df = stocks_df[stocks_df["Ticker"].str.len() > 0]
+
+        return stocks_df.sort_values("Ticker").reset_index(drop=True)
+
+    except:
+        return pd.DataFrame(columns=["Ticker", "Name"])
+
+stocks_df = load_stock_universe()
+company_names = dict(zip(stocks_df["Ticker"], stocks_df["Name"]))
+popular = stocks_df["Ticker"].tolist()
+
+# =============================
 # SESSION STATE
 # =============================
 if "logged_in" not in st.session_state:
@@ -134,85 +172,80 @@ if st.button("Logout"):
     st.rerun()
 
 # =============================
-# STOCK DATA
-# =============================
-company_names = {
-    "AAPL": "Apple Inc",
-    "AMZN": "Amazon.com Inc",
-    "AMD": "Advanced Micro Devices Inc",
-    "MSFT": "Microsoft Corp",
-    "META": "Meta Platforms Inc",
-    "TSLA": "Tesla Inc",
-    "GOOGL": "Alphabet Inc",
-    "NVDA": "NVIDIA Corp",
-    "NFLX": "Netflix Inc",
-    "INTC": "Intel Corp",
-    "UBER": "Uber Technologies Inc",
-    "DIS": "Walt Disney Co",
-    "SHOP": "Shopify Inc",
-    "PYPL": "PayPal Holdings Inc",
-    "BABA": "Alibaba Group"
-}
-
-popular = list(company_names.keys())
-
-# =============================
-# STOCK CHART VIEWER (FIXED)
+# STOCK CHART VIEWER
 # =============================
 st.subheader("📈 Stock Chart Viewer")
 
-search_input = st.text_input("Search stock (e.g. Tesla or AAPL)").upper()
+chart_search = st.text_input("Search stock (e.g. Tesla or AAPL)")
 
-ticker_map = {v.upper(): k for k, v in company_names.items()}
+chart_matches = pd.DataFrame()
 
-chart_ticker = None
+if chart_search and not stocks_df.empty:
+    q = chart_search.strip().upper()
+    chart_matches = stocks_df[
+        stocks_df["Ticker"].str.contains(q, na=False) |
+        stocks_df["Name"].str.upper().str.contains(q, na=False)
+    ].head(25)
 
-if search_input:
-    if search_input in company_names:
-        chart_ticker = search_input
-    elif search_input in ticker_map:
-        chart_ticker = ticker_map[search_input]
+if not chart_matches.empty:
+    chart_options = [
+        f"{row.Ticker} - {row.Name}" for _, row in chart_matches.iterrows()
+    ]
+
+    chart_selection = st.selectbox("Choose stock for chart", chart_options)
+    chart_ticker = chart_selection.split(" - ")[0]
+
+    chart_data = yf.Ticker(chart_ticker).history(period="6mo")
+
+    st.write(f"Showing: {chart_selection}")
+
+    if not chart_data.empty:
+        st.line_chart(chart_data["Close"])
     else:
-        for name, ticker in ticker_map.items():
-            if search_input in name:
-                chart_ticker = ticker
-                break
-
-if chart_ticker:
-    data = yf.Ticker(chart_ticker).history(period="6mo")
-
-    st.write(f"Showing: {chart_ticker} ({company_names.get(chart_ticker)})")
-
-    if not data.empty:
-        st.line_chart(data["Close"])
-    else:
-        st.error("No data found")
+        st.error("No chart data found.")
+elif chart_search:
+    st.warning("No matching stocks found.")
 
 # =============================
 # ADD TRADE
 # =============================
 st.sidebar.header("Add Trade")
 
-search = st.sidebar.text_input("Search Stock").upper()
-matches = [t for t in popular if t.startswith(search)] if search else popular
+search = st.sidebar.text_input("Search Stock").strip()
+
+matches_df = pd.DataFrame()
+
+if search and not stocks_df.empty:
+    q = search.upper()
+    matches_df = stocks_df[
+        stocks_df["Ticker"].str.contains(q, na=False) |
+        stocks_df["Name"].str.upper().str.contains(q, na=False)
+    ].head(25)
+else:
+    matches_df = stocks_df.head(25)
 
 options = []
 
-for t in matches:
+for _, row in matches_df.iterrows():
+    t = row["Ticker"]
+    name = row["Name"]
     price = get_price(t)
-    name = company_names.get(t, "Unknown")
 
     if price:
-        options.append(f"{t} — {name} (${price:.2f})")
+        options.append(f"{t} - {name} (${price:.2f})")
     else:
-        options.append(f"{t} — {name} (N/A)")
+        options.append(f"{t} - {name} (N/A)")
 
-selection = st.sidebar.selectbox("Select Stock", options)
-ticker = selection.split(" — ")[0]
+if options:
+    selection = st.sidebar.selectbox("Select Stock", options)
+    ticker = selection.split(" - ")[0]
+else:
+    ticker = None
+    st.sidebar.warning("No matching stocks found.")
 
 amount = st.sidebar.number_input("Amount ($)", value=100.0)
 
-if st.sidebar.button("Add Trade"):
+if st.sidebar.button("Add Trade") and ticker:
     price = get_price(ticker)
 
     if price:
@@ -224,11 +257,12 @@ if st.sidebar.button("Add Trade"):
         }
 
         st.session_state.portfolio.append(trade)
-
         portfolios[st.session_state.user] = st.session_state.portfolio
         save_portfolios(portfolios)
 
         st.success(f"Added {ticker}")
+    else:
+        st.error("Could not fetch price for that stock.")
 
 # =============================
 # PORTFOLIO VALUE
@@ -271,10 +305,13 @@ else:
 # =============================
 st.subheader("Market Watch")
 
-for t in popular:
+watchlist = ["AAPL", "MSFT", "TSLA", "NVDA", "AMZN", "GOOGL", "META"]
+
+for t in watchlist:
     price = get_price(t)
+    name = company_names.get(t, t)
     if price:
-        st.write(f"{t}: ${price:.2f}")
+        st.write(f"{t} - {name}: ${price:.2f}")
 
 # =============================
 # HISTORY
