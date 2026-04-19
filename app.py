@@ -9,7 +9,11 @@ from datetime import datetime
 # =============================
 # CONFIG
 # =============================
-st.set_page_config(page_title="TradeFlow", layout="wide")
+st.set_page_config(
+    page_title="TradeFlow",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
 
 USERS_FILE = "users.json"
 PORTFOLIO_FILE = "portfolio_data.json"
@@ -25,13 +29,59 @@ st.markdown("""
         background-color: #f4f7fb;
     }
 
-    section[data-testid="stSidebar"] {
-        background: linear-gradient(180deg, #031b4e 0%, #02153c 100%);
-        color: white;
+    /* Main container spacing */
+    .block-container {
+        padding-top: 1.2rem;
+        padding-bottom: 1.2rem;
     }
 
-    section[data-testid="stSidebar"] * {
+    /* Sidebar */
+    section[data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #031b4e 0%, #02153c 100%);
+    }
+
+    /* Sidebar text */
+    section[data-testid="stSidebar"] label,
+    section[data-testid="stSidebar"] .stMarkdown,
+    section[data-testid="stSidebar"] h1,
+    section[data-testid="stSidebar"] h2,
+    section[data-testid="stSidebar"] h3,
+    section[data-testid="stSidebar"] h4,
+    section[data-testid="stSidebar"] h5,
+    section[data-testid="stSidebar"] h6,
+    section[data-testid="stSidebar"] p,
+    section[data-testid="stSidebar"] span {
         color: white !important;
+    }
+
+    /* FIX: sidebar input text dark so you can see what you type */
+    section[data-testid="stSidebar"] input,
+    section[data-testid="stSidebar"] textarea {
+        background-color: white !important;
+        color: #102a43 !important;
+        border-radius: 10px !important;
+    }
+
+    section[data-testid="stSidebar"] [data-testid="stNumberInput"] input {
+        background-color: white !important;
+        color: #102a43 !important;
+    }
+
+    section[data-testid="stSidebar"] div[data-baseweb="select"] > div {
+        background-color: white !important;
+        color: #102a43 !important;
+        border-radius: 10px !important;
+    }
+
+    section[data-testid="stSidebar"] div[data-baseweb="select"] * {
+        color: #102a43 !important;
+    }
+
+    /* Buttons */
+    .stButton > button {
+        border-radius: 12px;
+        font-weight: 600;
+        width: 100%;
     }
 
     .main-title {
@@ -109,12 +159,14 @@ st.markdown("""
         align-items: center;
         padding: 14px 0;
         border-bottom: 1px solid #edf2f7;
+        gap: 12px;
     }
 
     .portfolio-left {
         display: flex;
         align-items: center;
         gap: 12px;
+        min-width: 0;
     }
 
     .portfolio-icon {
@@ -127,6 +179,7 @@ st.markdown("""
         font-size: 1.2rem;
         font-weight: 700;
         color: white;
+        flex-shrink: 0;
     }
 
     .icon-blue { background: #2f5bea; }
@@ -138,6 +191,7 @@ st.markdown("""
         font-size: 1rem;
         font-weight: 700;
         color: #102a43;
+        word-break: break-word;
     }
 
     .portfolio-meta {
@@ -173,12 +227,14 @@ st.markdown("""
         align-items: center;
         padding: 12px 0;
         border-bottom: 1px solid #edf2f7;
+        gap: 12px;
     }
 
     .watch-left {
         display: flex;
         align-items: center;
         gap: 12px;
+        min-width: 0;
     }
 
     .watch-logo {
@@ -189,6 +245,7 @@ st.markdown("""
         background: white;
         border: 1px solid #e6edf5;
         padding: 3px;
+        flex-shrink: 0;
     }
 
     .watch-name {
@@ -200,6 +257,7 @@ st.markdown("""
     .watch-sub {
         font-size: 0.85rem;
         color: #627d98;
+        word-break: break-word;
     }
 
     .watch-price {
@@ -218,6 +276,60 @@ st.markdown("""
         color: #ef4444;
         font-size: 0.9rem;
         font-weight: 700;
+    }
+
+    /* Make tables fit better on mobile */
+    .stDataFrame, .stTable {
+        font-size: 0.9rem;
+    }
+
+    /* Mobile */
+    @media (max-width: 768px) {
+        .block-container {
+            padding-top: 0.8rem;
+            padding-left: 0.7rem;
+            padding-right: 0.7rem;
+            padding-bottom: 1rem;
+        }
+
+        .main-title {
+            font-size: 1.5rem;
+        }
+
+        .subtitle {
+            font-size: 0.95rem;
+        }
+
+        .card,
+        .metric-card {
+            padding: 14px;
+            border-radius: 14px;
+        }
+
+        .metric-value {
+            font-size: 1.35rem;
+        }
+
+        .metric-label,
+        .metric-sub {
+            font-size: 0.85rem;
+        }
+
+        .section-title {
+            font-size: 1.1rem;
+        }
+
+        .portfolio-row,
+        .watch-row {
+            flex-direction: column;
+            align-items: flex-start;
+        }
+
+        .portfolio-value,
+        .watch-price {
+            text-align: left;
+            width: 100%;
+        }
     }
 </style>
 """, unsafe_allow_html=True)
@@ -647,9 +759,11 @@ if st.session_state.page == "Home":
     st.markdown(f"<div class='main-title'>Good morning, {user}!</div>", unsafe_allow_html=True)
     st.markdown("<div class='subtitle'>Here's how your investments are doing today.</div>", unsafe_allow_html=True)
 
-    c1, c2, c3, c4 = st.columns(4)
+    # 2x2 grid works better on phones
+    row1_col1, row1_col2 = st.columns(2)
+    row2_col1, row2_col2 = st.columns(2)
 
-    with c1:
+    with row1_col1:
         st.markdown(f"""
         <div class="metric-card metric-blue">
             <div class="metric-label">INVESTED</div>
@@ -657,7 +771,7 @@ if st.session_state.page == "Home":
         </div>
         """, unsafe_allow_html=True)
 
-    with c2:
+    with row1_col2:
         st.markdown(f"""
         <div class="metric-card metric-green">
             <div class="metric-label">CURRENT VALUE</div>
@@ -665,7 +779,7 @@ if st.session_state.page == "Home":
         </div>
         """, unsafe_allow_html=True)
 
-    with c3:
+    with row2_col1:
         color_class = "metric-white"
         pnl_sign = "+" if unrealized_profit >= 0 else ""
         pct_sign = "+" if pnl_pct >= 0 else ""
@@ -677,7 +791,7 @@ if st.session_state.page == "Home":
         </div>
         """, unsafe_allow_html=True)
 
-    with c4:
+    with row2_col2:
         st.markdown(f"""
         <div class="metric-card metric-blue">
             <div class="metric-label">PORTFOLIOS</div>
@@ -753,7 +867,13 @@ if st.session_state.page == "Home":
             change_class = "watch-change-up" if (change is not None and change >= 0) else "watch-change-down"
             change_sign = "+" if (change is not None and change >= 0) else ""
 
-            logo_html = f"<img class='watch-logo' src='{logo_url}'>" if logo_url else f"<div class='watch-logo'>{ticker[:1]}</div>"
+            if logo_url:
+                logo_html = f"<img class='watch-logo' src='{logo_url}' onerror=\"this.style.display='none'\">"
+            else:
+                logo_html = f"<div class='watch-logo'>{ticker[:1]}</div>"
+
+            price_text = f"${price:,.2f}" if price is not None else "N/A"
+            change_text = f"{change_sign}{change:.2f}%" if change is not None else "N/A"
 
             st.markdown(f"""
             <div class="watch-row">
@@ -765,8 +885,8 @@ if st.session_state.page == "Home":
                     </div>
                 </div>
                 <div class="watch-price">
-                    <div>${price:,.2f}</div>
-                    <div class="{change_class}">{change_sign}{change:.2f}%</div>
+                    <div>{price_text}</div>
+                    <div class="{change_class}">{change_text}</div>
                 </div>
             </div>
             """, unsafe_allow_html=True)
@@ -813,7 +933,7 @@ elif st.session_state.page == "Stock Viewer":
         st.write(f"Showing: {chart_ticker} - {chart_name}")
 
         if not chart_data.empty:
-            st.line_chart(chart_data["Close"])
+            st.line_chart(chart_data["Close"], use_container_width=True)
         else:
             st.error("No chart data found.")
 
@@ -1041,6 +1161,6 @@ elif st.session_state.page == "History":
     current_history = get_current_history()
     df_hist = pd.DataFrame(current_history)
     if not df_hist.empty:
-        st.line_chart(df_hist.set_index("time")["value"])
+        st.line_chart(df_hist.set_index("time")["value"], use_container_width=True)
     else:
         st.info("No portfolio history yet")
