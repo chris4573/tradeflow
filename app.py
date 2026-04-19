@@ -26,10 +26,9 @@ SALES_FILE = "sales_history.json"
 st.markdown("""
 <style>
     .stApp {
-        background-color: #f4f7fb;
+        background: linear-gradient(180deg, #f4f7fb 0%, #eaf1fb 100%);
     }
 
-    /* Main container spacing */
     .block-container {
         padding-top: 1.2rem;
         padding-bottom: 1.2rem;
@@ -40,7 +39,6 @@ st.markdown("""
         background: linear-gradient(180deg, #031b4e 0%, #02153c 100%);
     }
 
-    /* Sidebar text */
     section[data-testid="stSidebar"] label,
     section[data-testid="stSidebar"] .stMarkdown,
     section[data-testid="stSidebar"] h1,
@@ -54,7 +52,6 @@ st.markdown("""
         color: white !important;
     }
 
-    /* FIX: sidebar input text dark so you can see what you type */
     section[data-testid="stSidebar"] input,
     section[data-testid="stSidebar"] textarea {
         background-color: white !important;
@@ -77,11 +74,19 @@ st.markdown("""
         color: #102a43 !important;
     }
 
-    /* Buttons */
     .stButton > button {
         border-radius: 12px;
-        font-weight: 600;
+        font-weight: 700;
         width: 100%;
+        padding: 0.7rem 1rem;
+        border: none;
+        background: linear-gradient(135deg, #123d9b 0%, #0f57d5 100%);
+        color: white;
+        box-shadow: 0 8px 20px rgba(15, 87, 213, 0.18);
+    }
+
+    .stButton > button:hover {
+        filter: brightness(1.05);
     }
 
     .main-title {
@@ -278,12 +283,61 @@ st.markdown("""
         font-weight: 700;
     }
 
-    /* Make tables fit better on mobile */
     .stDataFrame, .stTable {
         font-size: 0.9rem;
     }
 
-    /* Mobile */
+    /* Auth screen */
+    .auth-wrap {
+        max-width: 460px;
+        margin: 3rem auto 1rem auto;
+    }
+
+    .auth-card {
+        background: rgba(255,255,255,0.96);
+        border: 1px solid #e6edf5;
+        border-radius: 24px;
+        padding: 28px;
+        box-shadow: 0 18px 50px rgba(16, 42, 67, 0.10);
+        backdrop-filter: blur(6px);
+    }
+
+    .auth-badge {
+        display: inline-block;
+        padding: 0.4rem 0.8rem;
+        border-radius: 999px;
+        background: #e8f0ff;
+        color: #0f57d5;
+        font-weight: 700;
+        font-size: 0.85rem;
+        margin-bottom: 1rem;
+    }
+
+    .auth-title {
+        font-size: 2rem;
+        font-weight: 800;
+        color: #102a43;
+        margin-bottom: 0.35rem;
+    }
+
+    .auth-subtitle {
+        color: #627d98;
+        font-size: 1rem;
+        margin-bottom: 1.2rem;
+    }
+
+    .auth-footer {
+        text-align: center;
+        color: #627d98;
+        font-size: 0.9rem;
+        margin-top: 1rem;
+    }
+
+    .stTextInput > div > div > input,
+    .stPasswordInput > div > div > input {
+        border-radius: 12px !important;
+    }
+
     @media (max-width: 768px) {
         .block-container {
             padding-top: 0.8rem;
@@ -301,9 +355,10 @@ st.markdown("""
         }
 
         .card,
-        .metric-card {
+        .metric-card,
+        .auth-card {
             padding: 14px;
-            border-radius: 14px;
+            border-radius: 16px;
         }
 
         .metric-value {
@@ -329,6 +384,14 @@ st.markdown("""
         .watch-price {
             text-align: left;
             width: 100%;
+        }
+
+        .auth-wrap {
+            margin-top: 1rem;
+        }
+
+        .auth-title {
+            font-size: 1.5rem;
         }
     }
 </style>
@@ -445,11 +508,19 @@ if "page" not in st.session_state:
 # LOGIN
 # =============================
 def login_page():
-    st.title("TradeFlow Login")
+    st.markdown("""
+    <div class="auth-wrap">
+        <div class="auth-card">
+            <div class="auth-badge">TradeFlow</div>
+            <div class="auth-title">Welcome back</div>
+            <div class="auth-subtitle">
+                Track your stocks, manage portfolios, and view your trading history in one place.
+            </div>
+    """, unsafe_allow_html=True)
 
-    mode = st.radio("Choose", ["Login", "Register"])
-    username = st.text_input("Username")
-    password = st.text_input("Password", type="password")
+    mode = st.radio("Account", ["Login", "Register"], horizontal=True)
+    username = st.text_input("Username", placeholder="Enter your username")
+    password = st.text_input("Password", type="password", placeholder="Enter your password")
 
     if mode == "Register":
         if st.button("Create Account"):
@@ -469,10 +540,10 @@ def login_page():
                 save_json(HISTORY_FILE, history)
                 save_json(SALES_FILE, sales_history)
 
-                st.success("Account created")
+                st.success("Account created. You can log in now.")
 
     if mode == "Login":
-        if st.button("Login"):
+        if st.button("Login to TradeFlow"):
             if username in users and users[username] == hash_password(password):
                 st.session_state.logged_in = True
                 st.session_state.user = username
@@ -501,6 +572,14 @@ def login_page():
                 st.rerun()
             else:
                 st.error("Invalid login")
+
+    st.markdown("""
+            <div class="auth-footer">
+                Built for simple stock tracking on desktop and phone.
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
 # =============================
 # DATA HELPERS
