@@ -1,3 +1,6 @@
 streamlit
+streamlit-autorefresh
 yfinance
 pandas
+matplotlib
+numpy
