@@ -2,6 +2,7 @@ import streamlit as st
 import json
 import os
 import hashlib
+import uuid
 import yfinance as yf
 import pandas as pd
 from datetime import datetime
@@ -14,6 +15,18 @@ from alerts_store import (
     save_alert_store,
     update_price_and_generate_alerts,
     get_recent_events,
+)
+from insights_engine import (
+    safe_pct_change,
+    best_category_label,
+    trend_label_from_history,
+    compare_asset_strength,
+    performance_score,
+    trade_win_rate,
+    best_and_worst_assets_from_portfolio_rows,
+    portfolio_change_summary,
+    consistency_ratio_from_history,
+    risk_level_from_behavior,
 )
 
 # =============================
@@ -32,6 +45,7 @@ SALES_FILE = "sales_history.json"
 ALERTS_FILE = "alerts_store.json"
 
 SUGGESTION_SCORE_THRESHOLD = 0.35
+
 # =============================
 # STYLING
 # =============================
@@ -278,9 +292,6 @@ st.markdown("""
     }
 
     .icon-blue { background: #2f5bea; }
-    .icon-purple { background: #7c3aed; }
-    .icon-gold { background: #d4a72c; }
-    .icon-green { background: #089981; }
 
     .portfolio-name {
         font-size: 1rem;
@@ -436,6 +447,7 @@ st.markdown("""
     }
 </style>
 """, unsafe_allow_html=True)
+
 # =============================
 # HELPERS
 # =============================
@@ -470,7 +482,8 @@ def normalize_users():
         if isinstance(value, str):
             users[username] = {
                 "password": value,
-                "visibility": "private"
+                "visibility": "private",
+                "user_id": f"TF-{uuid.uuid4().hex[:8].upper()}"
             }
             changed = True
         elif isinstance(value, dict):
@@ -480,10 +493,14 @@ def normalize_users():
             if "visibility" not in value:
                 value["visibility"] = "private"
                 changed = True
+            if "user_id" not in value or not str(value["user_id"]).strip():
+                value["user_id"] = f"TF-{uuid.uuid4().hex[:8].upper()}"
+                changed = True
         else:
             users[username] = {
                 "password": "",
-                "visibility": "private"
+                "visibility": "private",
+                "user_id": f"TF-{uuid.uuid4().hex[:8].upper()}"
             }
             changed = True
 
@@ -542,11 +559,47 @@ def normalize_sales_all():
         save_json(SALES_FILE, sales_history)
 
 
+def generate_unique_user_id():
+    existing_ids = {
+        value.get("user_id", "")
+        for value in users.values()
+        if isinstance(value, dict)
+    }
+    while True:
+        new_id = f"TF-{uuid.uuid4().hex[:8].upper()}"
+        if new_id not in existing_ids:
+            return new_id
+
+
+def get_user_id(username):
+    if username in users and isinstance(users[username], dict):
+        return users[username].get("user_id", "")
+    return ""
+
+
+def find_username_by_name_or_id(search_value):
+    if not search_value:
+        return None
+
+    cleaned = search_value.strip()
+    if cleaned in users:
+        return cleaned
+
+    lowered = cleaned.lower()
+    for username, info in users.items():
+        if username.lower() == lowered:
+            return username
+        if isinstance(info, dict):
+            user_id = str(info.get("user_id", "")).strip().lower()
+            if user_id == lowered:
+                return username
+    return None
+
+
 normalize_users()
 normalize_portfolios()
 normalize_history_all()
 normalize_sales_all()
-
 
 # =============================
 # SESSION
@@ -568,6 +621,7 @@ if "watchlist" not in st.session_state:
 
 if "suggested_search_value" not in st.session_state:
     st.session_state.suggested_search_value = ""
+
 # =============================
 # LOGIN
 # =============================
@@ -608,7 +662,8 @@ def login_page():
             else:
                 users[username] = {
                     "password": hash_password(password),
-                    "visibility": "private"
+                    "visibility": "private",
+                    "user_id": generate_unique_user_id()
                 }
                 save_json(USERS_FILE, users)
 
@@ -633,6 +688,7 @@ def login_page():
                 st.error("Invalid login")
 
     st.markdown("</div></div>", unsafe_allow_html=True)
+
 # =============================
 # DATA HELPERS
 # =============================
@@ -976,6 +1032,116 @@ def build_public_portfolio_allocations(username):
         })
 
     return pd.DataFrame(data).sort_values("Percent", ascending=False)
+
+
+@st.cache_data(ttl=60)
+def get_asset_comparison_metrics(ticker):
+    analysis = get_asset_analysis(ticker)
+
+    try:
+        data = yf.Ticker(ticker).history(period="10d")
+        if data is None or data.empty or "Close" not in data.columns:
+            change_7d = 0.0
+        else:
+            close = data["Close"].dropna()
+            if len(close) >= 2:
+                current = float(close.iloc[-1])
+                previous_7d = float(close.iloc[0])
+                change_7d = safe_pct_change(current, previous_7d)
+            else:
+                change_7d = 0.0
+    except Exception:
+        change_7d = 0.0
+
+    momentum_score = (
+        float(analysis.get("change_1h", 0)) * 0.4
+        + float(analysis.get("change_24h", 0)) * 0.4
+        + float(change_7d) * 0.2
+    )
+
+    return {
+        "ticker": ticker,
+        "change_1h": float(analysis.get("change_1h", 0)),
+        "change_24h": float(analysis.get("change_24h", 0)),
+        "change_7d": float(change_7d),
+        "volatility_pct": float(analysis.get("volatility_pct", 0)),
+        "volatility_label": analysis.get("volatility", "Low volatility 🟢"),
+        "trend": analysis.get("trend", "Neutral ➖"),
+        "momentum_score": momentum_score,
+    }
+
+
+def build_portfolio_recap(portfolio_df, history_rows, sales_rows):
+    daily_value_change, daily_pct_change = portfolio_change_summary(history_rows, lookback_points=1)
+    weekly_value_change, weekly_pct_change = portfolio_change_summary(history_rows, lookback_points=7)
+
+    portfolio_rows = portfolio_df.to_dict("records") if not portfolio_df.empty else []
+    best_trade_text, worst_trade_text = best_and_worst_assets_from_portfolio_rows(portfolio_rows)
+
+    wins, losses, win_rate = trade_win_rate(sales_rows)
+    consistency = consistency_ratio_from_history(history_rows)
+
+    overall_score = performance_score(
+        total_change_pct=weekly_pct_change,
+        win_rate_pct=win_rate,
+        consistency_ratio=consistency,
+    )
+
+    return {
+        "daily_value_change": daily_value_change,
+        "daily_pct_change": daily_pct_change,
+        "weekly_value_change": weekly_value_change,
+        "weekly_pct_change": weekly_pct_change,
+        "best_trade_text": best_trade_text,
+        "worst_trade_text": worst_trade_text,
+        "wins": wins,
+        "losses": losses,
+        "win_rate": win_rate,
+        "consistency": consistency,
+        "overall_score": overall_score,
+    }
+
+
+def build_public_profile_insights(username):
+    public_df = build_public_portfolio_allocations(username)
+    allocation_rows = public_df.to_dict("records") if not public_df.empty else []
+
+    user_history = history.get(username, {})
+    combined_history = []
+    if isinstance(user_history, dict):
+        for _, rows in user_history.items():
+            if isinstance(rows, list):
+                combined_history.extend(rows)
+        combined_history = sorted(combined_history, key=lambda x: str(x.get("time", "")))
+
+    user_sales = sales_history.get(username, {})
+    combined_sales = []
+    if isinstance(user_sales, dict):
+        for _, rows in user_sales.items():
+            if isinstance(rows, list):
+                combined_sales.extend(rows)
+
+    user_portfolios = get_user_portfolios(username)
+    combined_portfolio = []
+    for _, rows in user_portfolios.items():
+        if isinstance(rows, list):
+            combined_portfolio.extend(rows)
+
+    public_portfolio_df = build_portfolio_df(combined_portfolio)
+    public_rows = public_portfolio_df.to_dict("records") if not public_portfolio_df.empty else []
+
+    wins, losses, win_rate = trade_win_rate(combined_sales)
+    trend_text = trend_label_from_history(combined_history)
+    category_text = best_category_label(allocation_rows)
+    risk_text = risk_level_from_behavior(allocation_rows, combined_sales, public_rows)
+
+    return {
+        "win_rate": win_rate,
+        "trend_text": trend_text,
+        "category_text": category_text,
+        "risk_text": risk_text,
+    }
+
 # =============================
 # APP START
 # =============================
@@ -1012,6 +1178,11 @@ for ticker in seen_tickers:
 
 save_alert_store(ALERTS_FILE, alert_store)
 recent_alerts = get_recent_events(alert_store, user, limit=12)
+
+current_history_rows = get_current_history()
+current_sales_rows = get_current_sales()
+current_recap = build_portfolio_recap(portfolio_df, current_history_rows, current_sales_rows)
+
 # =============================
 # SIDEBAR
 # =============================
@@ -1019,7 +1190,7 @@ st.sidebar.title("TradeFlow")
 
 page = st.sidebar.radio(
     "Navigation",
-    ["Home", "Stock Viewer", "Profiles", "Settings", "History"]
+    ["Home", "Stock Viewer", "Compare Assets", "Profiles", "Settings", "History"]
 )
 st.session_state.page = page
 
@@ -1070,6 +1241,7 @@ if st.sidebar.button("Logout"):
     st.session_state.user = ""
     st.session_state.selected_portfolio = "Main"
     st.rerun()
+
 # =============================
 # HOME PAGE
 # =============================
@@ -1094,40 +1266,53 @@ if st.session_state.page == "Home":
     </div>
     """, unsafe_allow_html=True)
 
-    c1, c2, c3, c4 = st.columns(4)
+    recap_col1, recap_col2, recap_col3, recap_col4 = st.columns(4)
 
-    with c1:
+    with recap_col1:
         st.markdown(f"""
         <div class="metric-card metric-blue">
-            <div class="metric-label">INVESTED</div>
-            <div class="metric-value">${invested:,.2f}</div>
+            <div class="metric-label">TODAY</div>
+            <div class="metric-value">{current_recap['daily_pct_change']:+.2f}%</div>
+            <div class="metric-sub">{current_recap['daily_value_change']:+.2f}$</div>
         </div>
         """, unsafe_allow_html=True)
 
-    with c2:
+    with recap_col2:
         st.markdown(f"""
         <div class="metric-card metric-green">
-            <div class="metric-label">CURRENT VALUE</div>
-            <div class="metric-value">${current_value:,.2f}</div>
+            <div class="metric-label">THIS WEEK</div>
+            <div class="metric-value">{current_recap['weekly_pct_change']:+.2f}%</div>
+            <div class="metric-sub">{current_recap['weekly_value_change']:+.2f}$</div>
         </div>
         """, unsafe_allow_html=True)
 
-    with c3:
+    with recap_col3:
         st.markdown(f"""
         <div class="metric-card metric-white">
-            <div class="metric-label">P/L</div>
-            <div class="metric-value">${unrealized_profit:,.2f}</div>
-            <div class="metric-sub">{pnl_pct:.2f}%</div>
+            <div class="metric-label">WIN RATE</div>
+            <div class="metric-value">{current_recap['win_rate']:.1f}%</div>
+            <div class="metric-sub">{current_recap['wins']} wins / {current_recap['losses']} losses</div>
         </div>
         """, unsafe_allow_html=True)
 
-    with c4:
+    with recap_col4:
         st.markdown(f"""
         <div class="metric-card metric-blue">
-            <div class="metric-label">PORTFOLIOS</div>
-            <div class="metric-value">{portfolio_count}</div>
+            <div class="metric-label">PERFORMANCE SCORE</div>
+            <div class="metric-value">{current_recap['overall_score']}</div>
+            <div class="metric-sub">Overall recap</div>
         </div>
         """, unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    st.markdown("<div class='card'>", unsafe_allow_html=True)
+    st.markdown("<div class='section-title'>Performance Recap</div>", unsafe_allow_html=True)
+    st.write(f"**Best performing asset:** {current_recap['best_trade_text']}")
+    st.write(f"**Worst performing asset:** {current_recap['worst_trade_text']}")
+    st.write(f"**Profitable trades:** {current_recap['wins']}")
+    st.write(f"**Losing trades:** {current_recap['losses']}")
+    st.markdown("</div>", unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -1317,26 +1502,149 @@ if st.session_state.page == "Home":
                     st.session_state.watchlist.pop(idx)
                     st.rerun()
 
-        st.markdown("</div>", unsafe_allow_html=True)# =============================
+        st.markdown("</div>", unsafe_allow_html=True)
+
+# =============================
+# STOCK VIEWER
+# =============================
+elif st.session_state.page == "Stock Viewer":
+    st.subheader("Stock Viewer")
+
+    default_search = st.session_state.get("suggested_search_value", "")
+    search_input = st.text_input(
+        "Enter stock or crypto name/ticker (e.g. Apple, AAPL, Bitcoin, BTC-USD)",
+        value=default_search
+    )
+
+    ticker = resolve_ticker(search_input)
+
+    if search_input:
+        st.session_state["suggested_search_value"] = search_input
+
+    if ticker:
+        price = get_price(ticker)
+
+        if price:
+            analysis = get_asset_analysis(ticker)
+
+            st.success(f"{ticker} Price: ${price:.2f}")
+            st.write(f"**Trend:** {analysis['trend']}")
+            st.write(f"**Volatility:** {analysis['volatility']}")
+            st.write(f"**1H Change:** {analysis['change_1h']:+.2f}%")
+            st.write(f"**24H Change:** {analysis['change_24h']:+.2f}%")
+
+            spike_msg = None
+            if analysis["change_5m"] >= 1.0:
+                spike_msg = "Spike up 📈"
+            elif analysis["change_5m"] <= -1.0:
+                spike_msg = "Drop down 📉"
+
+            if spike_msg:
+                st.warning(f"{spike_msg} ({analysis['change_5m']:+.2f}% over ~5m)")
+
+            amount = st.number_input("Amount to invest ($)", value=100.0, min_value=1.0)
+
+            if st.button("Add to Portfolio"):
+                trade = {
+                    "Ticker": ticker,
+                    "Amount": amount,
+                    "Price": price,
+                    "Shares": amount / price,
+                    "Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                }
+
+                current_portfolio.append(trade)
+                save_current_portfolio(current_portfolio)
+                st.success(f"Bought {ticker}")
+                st.rerun()
+        else:
+            st.error("Invalid ticker or name")
+
+# =============================
+# COMPARE ASSETS
+# =============================
+elif st.session_state.page == "Compare Assets":
+    st.subheader("Asset Comparison")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        left_input = st.text_input("Left asset", placeholder="BTC, Apple, AAPL, ETH-USD", key="compare_left")
+    with col2:
+        right_input = st.text_input("Right asset", placeholder="ETH, Tesla, TSLA, BTC-USD", key="compare_right")
+
+    left_ticker = resolve_ticker(left_input)
+    right_ticker = resolve_ticker(right_input)
+
+    if left_ticker and right_ticker:
+        left_price = get_price(left_ticker)
+        right_price = get_price(right_ticker)
+
+        if left_price is not None and right_price is not None:
+            left_metrics = get_asset_comparison_metrics(left_ticker)
+            right_metrics = get_asset_comparison_metrics(right_ticker)
+            winner_text = compare_asset_strength(left_metrics, right_metrics)
+
+            left_score = left_metrics["momentum_score"] - left_metrics["volatility_pct"] * 0.2
+            right_score = right_metrics["momentum_score"] - right_metrics["volatility_pct"] * 0.2
+
+            left_label = "🏆 Stronger recently" if left_score > right_score else ""
+            right_label = "🏆 Stronger recently" if right_score > left_score else ""
+
+            compare_left, compare_right = st.columns(2)
+
+            with compare_left:
+                st.markdown("<div class='card'>", unsafe_allow_html=True)
+                st.markdown(f"### {left_ticker} {left_label}")
+                st.write(f"**1H:** {left_metrics['change_1h']:+.2f}%")
+                st.write(f"**24H:** {left_metrics['change_24h']:+.2f}%")
+                st.write(f"**7D:** {left_metrics['change_7d']:+.2f}%")
+                st.write(f"**Volatility:** {left_metrics['volatility_label']}")
+                st.write(f"**Trend:** {left_metrics['trend']}")
+                st.write(f"**Momentum score:** {left_metrics['momentum_score']:+.2f}")
+                st.markdown("</div>", unsafe_allow_html=True)
+
+            with compare_right:
+                st.markdown("<div class='card'>", unsafe_allow_html=True)
+                st.markdown(f"### {right_ticker} {right_label}")
+                st.write(f"**1H:** {right_metrics['change_1h']:+.2f}%")
+                st.write(f"**24H:** {right_metrics['change_24h']:+.2f}%")
+                st.write(f"**7D:** {right_metrics['change_7d']:+.2f}%")
+                st.write(f"**Volatility:** {right_metrics['volatility_label']}")
+                st.write(f"**Trend:** {right_metrics['trend']}")
+                st.write(f"**Momentum score:** {right_metrics['momentum_score']:+.2f}")
+                st.markdown("</div>", unsafe_allow_html=True)
+
+            st.info(winner_text)
+        else:
+            st.error("Could not find one or both assets.")
+
+# =============================
 # PROFILES
 # =============================
 elif st.session_state.page == "Profiles":
     st.subheader("Search Profiles")
 
-    search_user = st.text_input("Enter username")
+    search_user = st.text_input("Search by username or user ID")
 
     if search_user:
-        if search_user not in users:
+        matched_username = find_username_by_name_or_id(search_user)
+
+        if not matched_username:
             st.error("User not found")
         else:
-            visibility = get_user_visibility(search_user)
+            st.write(f"**Username:** {matched_username}")
+            st.write(f"**User ID:** {get_user_id(matched_username)}")
+
+            visibility = get_user_visibility(matched_username)
 
             if visibility == "private":
-                st.warning("🔒 This account is private")
+                st.warning("This account is private 🔒")
             else:
                 st.success("📊 Public Portfolio")
 
-                df = build_public_portfolio_allocations(search_user)
+                df = build_public_portfolio_allocations(matched_username)
+                insights = build_public_profile_insights(matched_username)
 
                 if not df.empty:
                     fig, ax = plt.subplots(figsize=(6, 6))
@@ -1345,10 +1653,19 @@ elif st.session_state.page == "Profiles":
                         labels=df["Ticker"],
                         autopct="%1.1f%%"
                     )
-                    ax.set_title(f"{search_user}'s Portfolio Allocation")
+                    ax.set_title(f"{matched_username}'s Portfolio Allocation")
                     st.pyplot(fig)
                 else:
-                    st.info("No data available")
+                    st.info("No public portfolio data available")
+
+                st.markdown("<div class='card'>", unsafe_allow_html=True)
+                st.markdown("<div class='section-title'>Performance Insights</div>", unsafe_allow_html=True)
+                st.write(f"**Success rate:** {insights['win_rate']:.1f}% 📊")
+                st.write(f"**Trend:** {insights['trend_text']}")
+                st.write(f"**Sector strength:** {insights['category_text']}")
+                st.write(f"**Risk level:** {insights['risk_text']}")
+                st.markdown("</div>", unsafe_allow_html=True)
+
 # =============================
 # SETTINGS
 # =============================
@@ -1357,6 +1674,7 @@ elif st.session_state.page == "Settings":
 
     visibility = get_user_visibility(user)
     st.write(f"Current visibility: **{visibility.title()}**")
+    st.write(f"**Your user ID:** `{get_user_id(user)}`")
 
     col1, col2 = st.columns(2)
 
@@ -1371,7 +1689,6 @@ elif st.session_state.page == "Settings":
             set_user_visibility(user, "private")
             st.success("Profile set to private")
             st.rerun()
-
 
 # =============================
 # HISTORY
