@@ -3,6 +3,7 @@ import json
 import os
 import hashlib
 import uuid
+from urllib.parse import urlparse
 import yfinance as yf
 import pandas as pd
 from datetime import datetime
@@ -847,6 +848,134 @@ def build_suggested_assets():
     return pd.DataFrame(rows).sort_values("Score", ascending=False).head(8)
 
 
+@st.cache_data(ttl=120)
+def get_ticker_news(ticker, limit=12):
+    try:
+        if not ticker:
+            return []
+
+        resolved = resolve_ticker(ticker)
+        if not resolved:
+            return []
+
+        news_items = yf.Ticker(resolved).news
+        if not news_items:
+            return []
+
+        cleaned_items = []
+        for item in news_items[:limit]:
+            content = item.get("content", {}) if isinstance(item, dict) else {}
+
+            title = (
+                content.get("title")
+                or item.get("title")
+                or "Untitled headline"
+            )
+
+            link = (
+                content.get("canonicalUrl", {}).get("url")
+                or content.get("clickThroughUrl", {}).get("url")
+                or item.get("link")
+                or ""
+            )
+
+            publisher = (
+                content.get("provider", {}).get("displayName")
+                or item.get("publisher")
+                or "Unknown source"
+            )
+
+            published_at = (
+                content.get("pubDate")
+                or item.get("providerPublishTime")
+                or ""
+            )
+
+            summary = (
+                content.get("summary")
+                or item.get("summary")
+                or ""
+            )
+
+            cleaned_items.append({
+                "title": title,
+                "link": link,
+                "publisher": publisher,
+                "published_at": published_at,
+                "summary": summary,
+                "ticker": resolved,
+            })
+
+        return cleaned_items
+
+    except Exception:
+        return []
+
+
+@st.cache_data(ttl=120)
+def get_multi_asset_news(tickers, limit_per_ticker=4, total_limit=16):
+    all_news = []
+    seen_links = set()
+
+    for ticker in tickers:
+        items = get_ticker_news(ticker, limit=limit_per_ticker)
+        for item in items:
+            link = item.get("link", "")
+            if link and link not in seen_links:
+                seen_links.add(link)
+                all_news.append(item)
+
+    def sort_key(item):
+        return str(item.get("published_at", ""))
+
+    all_news = sorted(all_news, key=sort_key, reverse=True)
+    return all_news[:total_limit]
+
+
+def get_news_domain(link):
+    try:
+        if not link:
+            return ""
+        return urlparse(link).netloc.replace("www.", "")
+    except Exception:
+        return ""
+
+
+def is_preferred_news_source(item):
+    publisher = str(item.get("publisher", "")).lower()
+    domain = get_news_domain(item.get("link", "")).lower()
+
+    preferred_terms = [
+        "reuters",
+        "associated press",
+        "ap news",
+        "bloomberg",
+        "cnbc",
+        "marketwatch",
+        "barrons",
+        "financial times",
+        "wsj",
+        "the wall street journal",
+        "investopedia",
+        "yahoo finance",
+    ]
+
+    return any(term in publisher or term in domain for term in preferred_terms)
+
+
+def split_news_by_quality(news_items):
+    preferred = []
+    other = []
+
+    for item in news_items:
+        if is_preferred_news_source(item):
+            preferred.append(item)
+        else:
+            other.append(item)
+
+    return preferred, other
+
+
 def get_user_portfolios(user):
     if user not in portfolios:
         portfolios[user] = {"Main": []}
@@ -1190,7 +1319,7 @@ st.sidebar.title("TradeFlow")
 
 page = st.sidebar.radio(
     "Navigation",
-    ["Home", "Stock Viewer", "Compare Assets", "Profiles", "Settings", "History"]
+    ["Home", "Stock Viewer", "Compare Assets", "News", "Profiles", "Settings", "History"]
 )
 st.session_state.page = page
 
@@ -1618,6 +1747,90 @@ elif st.session_state.page == "Compare Assets":
             st.info(winner_text)
         else:
             st.error("Could not find one or both assets.")
+
+# =============================
+# NEWS
+# =============================
+elif st.session_state.page == "News":
+    st.subheader("Market News")
+    st.caption("News updates automatically about every 2 minutes.")
+
+    news_mode = st.radio(
+        "News Source",
+        ["My Watchlist", "My Portfolio", "Search Ticker"],
+        horizontal=True
+    )
+
+    selected_news = []
+
+    if news_mode == "My Watchlist":
+        tickers = st.session_state.watchlist[:8]
+        selected_news = get_multi_asset_news(tickers, limit_per_ticker=4, total_limit=20)
+
+    elif news_mode == "My Portfolio":
+        portfolio_tickers = sorted({
+            trade.get("Ticker", "")
+            for trade in current_portfolio
+            if trade.get("Ticker")
+        })
+        selected_news = get_multi_asset_news(portfolio_tickers[:8], limit_per_ticker=4, total_limit=20)
+
+    elif news_mode == "Search Ticker":
+        search_input = st.text_input(
+            "Search stock or crypto news",
+            placeholder="Example: Apple, Tesla, Bitcoin, AAPL"
+        )
+        resolved = resolve_ticker(search_input)
+
+        if search_input and resolved:
+            st.write(f"Showing headlines for **{resolved}**")
+            selected_news = get_ticker_news(resolved, limit=15)
+
+    preferred_news, other_news = split_news_by_quality(selected_news)
+
+    if selected_news:
+        top_story = selected_news[0]
+        st.markdown("<div class='card'>", unsafe_allow_html=True)
+        st.markdown("### Top Story")
+        st.markdown(f"**{top_story['title']}**")
+        st.caption(f"{top_story['publisher']} • {top_story.get('ticker', '')}")
+        if top_story.get("summary"):
+            st.write(top_story["summary"])
+        if top_story.get("link"):
+            st.markdown(f"[Open article]({top_story['link']})")
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    if preferred_news:
+        st.markdown("### Preferred Sources")
+        start_index = 1 if selected_news and preferred_news and preferred_news[0]["title"] == selected_news[0]["title"] else 0
+        for item in preferred_news[start_index:]:
+            st.markdown("<div class='card'>", unsafe_allow_html=True)
+            st.markdown(f"**{item['title']}**")
+            st.caption(f"{item['publisher']} • {item.get('ticker', '')}")
+            if item.get("summary"):
+                st.write(item["summary"])
+            if item.get("link"):
+                st.markdown(f"[Open article]({item['link']})")
+            st.markdown("</div>", unsafe_allow_html=True)
+
+    if other_news:
+        st.markdown("### More Headlines")
+        for item in other_news:
+            st.markdown("<div class='card'>", unsafe_allow_html=True)
+            st.markdown(f"**{item['title']}**")
+            st.caption(f"{item['publisher']} • {item.get('ticker', '')}")
+            if item.get("summary"):
+                st.write(item["summary"])
+            if item.get("link"):
+                st.markdown(f"[Open article]({item['link']})")
+            st.markdown("</div>", unsafe_allow_html=True)
+
+    if not selected_news:
+        st.info("No news found right now. Try a different ticker or check again in a minute.")
+
+    if st.button("Refresh News Now"):
+        st.cache_data.clear()
+        st.rerun()
 
 # =============================
 # PROFILES
