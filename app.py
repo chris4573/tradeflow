@@ -3,13 +3,18 @@ import json
 import os
 import hashlib
 import uuid
+import secrets
+import smtplib
 from urllib.parse import urlparse
+from datetime import datetime
+from email.message import EmailMessage
+
 import yfinance as yf
 import pandas as pd
-from datetime import datetime
 import matplotlib.pyplot as plt
 
 from streamlit_autorefresh import st_autorefresh
+
 from market_engine import SCAN_UNIVERSE, ASSET_LABELS, analyze_market_frame
 from alerts_store import (
     load_alert_store,
@@ -29,6 +34,7 @@ from insights_engine import (
     consistency_ratio_from_history,
     risk_level_from_behavior,
 )
+from ai_engine import score_trade_idea
 
 # =============================
 # CONFIG
@@ -46,6 +52,13 @@ SALES_FILE = "sales_history.json"
 ALERTS_FILE = "alerts_store.json"
 
 SUGGESTION_SCORE_THRESHOLD = 0.35
+
+# =============================
+# EMAIL RESET CONFIG
+# REPLACE THESE WITH YOUR REAL GMAIL DETAILS
+# =============================
+SMTP_EMAIL = "YOUR_GMAIL@gmail.com"
+SMTP_APP_PASSWORD = "YOUR_16_CHAR_APP_PASSWORD"
 
 # =============================
 # STYLING
@@ -209,18 +222,19 @@ st.markdown("""
     }
 
     .ticker-bar {
-        background: linear-gradient(180deg, #031b4e 0%, #02153c 100%);
-        border-radius: 20px;
+        background: white;
+        border-radius: 18px;
         padding: 14px 18px;
         display: grid;
         grid-template-columns: repeat(4, 1fr);
         gap: 10px;
         margin-bottom: 24px;
-        box-shadow: 0 8px 24px rgba(16, 42, 67, 0.14);
+        box-shadow: 0 8px 24px rgba(16, 42, 67, 0.08);
+        border: 1px solid #e6edf5;
     }
 
     .ticker-item {
-        color: white;
+        color: #102a43;
         text-align: center;
         font-weight: 800;
         font-size: 0.98rem;
@@ -448,14 +462,9 @@ st.markdown("""
     }
 </style>
 """, unsafe_allow_html=True)
-
 # =============================
-# HELPERS
+# FILE HELPERS
 # =============================
-def hash_password(password):
-    return hashlib.sha256(password.encode("utf-8")).hexdigest()
-
-
 def load_json(path, default):
     if os.path.exists(path):
         try:
@@ -471,37 +480,103 @@ def save_json(path, data):
         json.dump(data, f, indent=2)
 
 
+# =============================
+# BASE DATA
+# =============================
 users = load_json(USERS_FILE, {})
 portfolios = load_json(PORTFOLIO_FILE, {})
 history = load_json(HISTORY_FILE, {})
 sales_history = load_json(SALES_FILE, {})
 
 
+# =============================
+# USER / AUTH HELPERS
+# =============================
+def hash_password(password):
+    return hashlib.sha256(password.encode("utf-8")).hexdigest()
+
+
+def generate_unique_user_id():
+    existing_ids = {
+        value.get("user_id", "")
+        for value in users.values()
+        if isinstance(value, dict)
+    }
+    while True:
+        new_id = f"TF-{uuid.uuid4().hex[:8].upper()}"
+        if new_id not in existing_ids:
+            return new_id
+
+
+def send_reset_email(to_email, reset_code, username):
+    try:
+        msg = EmailMessage()
+        msg["Subject"] = "TradeFlow Password Reset"
+        msg["From"] = SMTP_EMAIL
+        msg["To"] = to_email
+
+        msg.set_content(
+            f"""Hi {username},
+
+You requested a password reset for your TradeFlow account.
+
+Your reset code is:
+
+{reset_code}
+
+Enter this code in the TradeFlow app to set a new password.
+
+If you did not request this, you can ignore this email.
+"""
+        )
+
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
+            smtp.login(SMTP_EMAIL, SMTP_APP_PASSWORD)
+            smtp.send_message(msg)
+
+        return True, "Reset email sent"
+    except Exception as e:
+        return False, f"Could not send email: {e}"
+
+
 def normalize_users():
     changed = False
+
     for username, value in list(users.items()):
         if isinstance(value, str):
             users[username] = {
                 "password": value,
+                "email": "",
                 "visibility": "private",
-                "user_id": f"TF-{uuid.uuid4().hex[:8].upper()}"
+                "user_id": generate_unique_user_id(),
+                "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             }
             changed = True
+
         elif isinstance(value, dict):
             if "password" not in value:
                 value["password"] = ""
+                changed = True
+            if "email" not in value:
+                value["email"] = ""
                 changed = True
             if "visibility" not in value:
                 value["visibility"] = "private"
                 changed = True
             if "user_id" not in value or not str(value["user_id"]).strip():
-                value["user_id"] = f"TF-{uuid.uuid4().hex[:8].upper()}"
+                value["user_id"] = generate_unique_user_id()
                 changed = True
+            if "created_at" not in value:
+                value["created_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                changed = True
+
         else:
             users[username] = {
                 "password": "",
+                "email": "",
                 "visibility": "private",
-                "user_id": f"TF-{uuid.uuid4().hex[:8].upper()}"
+                "user_id": generate_unique_user_id(),
+                "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             }
             changed = True
 
@@ -511,6 +586,7 @@ def normalize_users():
 
 def normalize_portfolios():
     changed = False
+
     for username, value in list(portfolios.items()):
         if isinstance(value, list):
             portfolios[username] = {"Main": value}
@@ -528,6 +604,7 @@ def normalize_portfolios():
 
 def normalize_history_all():
     changed = False
+
     for username, value in list(history.items()):
         if isinstance(value, list):
             history[username] = {"Main": value}
@@ -545,6 +622,7 @@ def normalize_history_all():
 
 def normalize_sales_all():
     changed = False
+
     for username, value in list(sales_history.items()):
         if isinstance(value, list):
             sales_history[username] = {"Main": value}
@@ -560,16 +638,20 @@ def normalize_sales_all():
         save_json(SALES_FILE, sales_history)
 
 
-def generate_unique_user_id():
-    existing_ids = {
-        value.get("user_id", "")
-        for value in users.values()
-        if isinstance(value, dict)
-    }
-    while True:
-        new_id = f"TF-{uuid.uuid4().hex[:8].upper()}"
-        if new_id not in existing_ids:
-            return new_id
+def email_exists(email):
+    lowered = email.strip().lower()
+    for _, info in users.items():
+        if isinstance(info, dict) and str(info.get("email", "")).strip().lower() == lowered:
+            return True
+    return False
+
+
+def get_username_from_email(email):
+    lowered = email.strip().lower()
+    for username, info in users.items():
+        if isinstance(info, dict) and str(info.get("email", "")).strip().lower() == lowered:
+            return username
+    return None
 
 
 def get_user_id(username):
@@ -583,10 +665,11 @@ def find_username_by_name_or_id(search_value):
         return None
 
     cleaned = search_value.strip()
+    lowered = cleaned.lower()
+
     if cleaned in users:
         return cleaned
 
-    lowered = cleaned.lower()
     for username, info in users.items():
         if username.lower() == lowered:
             return username
@@ -594,6 +677,7 @@ def find_username_by_name_or_id(search_value):
             user_id = str(info.get("user_id", "")).strip().lower()
             if user_id == lowered:
                 return username
+
     return None
 
 
@@ -601,6 +685,7 @@ normalize_users()
 normalize_portfolios()
 normalize_history_all()
 normalize_sales_all()
+
 
 # =============================
 # SESSION
@@ -623,22 +708,35 @@ if "watchlist" not in st.session_state:
 if "suggested_search_value" not in st.session_state:
     st.session_state.suggested_search_value = ""
 
+if "reset_code" not in st.session_state:
+    st.session_state.reset_code = ""
+
+if "reset_user" not in st.session_state:
+    st.session_state.reset_user = ""
+
+if "reset_email" not in st.session_state:
+    st.session_state.reset_email = ""
+
+if "show_reset_form" not in st.session_state:
+    st.session_state.show_reset_form = False
+
+
 # =============================
-# LOGIN
+# LOGIN / REGISTER PAGE
 # =============================
 def login_page():
+    st.markdown('<div class="login-wrap">', unsafe_allow_html=True)
+
     st.markdown("""
-    <div class="login-wrap">
-        <div class="ticker-bar">
-            <div class="ticker-item">AAPL ▲ 1.24%</div>
-            <div class="ticker-item">TSLA ▼ -0.87%</div>
-            <div class="ticker-item">NVDA ▲ 2.58%</div>
-            <div class="ticker-item">SPY ▲ 0.31%</div>
-        </div>
+    <div class="ticker-bar">
+        <div class="ticker-item">AAPL ▲ 1.24%</div>
+        <div class="ticker-item">TSLA ▼ -0.87%</div>
+        <div class="ticker-item">NVDA ▲ 2.58%</div>
+        <div class="ticker-item">BTC ▲ 0.31%</div>
     </div>
     """, unsafe_allow_html=True)
 
-    st.markdown('<div class="login-wrap"><div class="login-card">', unsafe_allow_html=True)
+    st.markdown('<div class="login-card">', unsafe_allow_html=True)
 
     st.markdown("""
     <div class="login-brand">
@@ -647,30 +745,69 @@ def login_page():
     </div>
     """, unsafe_allow_html=True)
 
-    st.subheader("Welcome back")
+    tab1, tab2, tab3 = st.tabs(["Login", "Register", "Forgot Password"])
 
-    mode = st.radio("Select Mode", ["Login", "Register"], horizontal=True)
+    with tab1:
+        login_email = st.text_input("Email", key="login_email")
+        login_password = st.text_input("Password", type="password", key="login_password")
 
-    username = st.text_input("Username")
-    password = st.text_input("Password", type="password")
+        if st.button("Login"):
+            matched_username = get_username_from_email(login_email)
 
-    if mode == "Register":
-        if st.button("Create Account"):
-            if username in users:
-                st.error("User already exists")
-            elif not username.strip() or not password.strip():
-                st.error("Enter a username and password")
+            if not matched_username:
+                st.error("No account found with that email")
             else:
-                users[username] = {
-                    "password": hash_password(password),
+                stored_password = users[matched_username].get("password", "")
+
+                valid_login = (
+                    stored_password == login_password
+                    or stored_password == hash_password(login_password)
+                )
+
+                if valid_login:
+                    if stored_password == login_password:
+                        users[matched_username]["password"] = hash_password(login_password)
+                        save_json(USERS_FILE, users)
+
+                    st.session_state.logged_in = True
+                    st.session_state.user = matched_username
+                    st.session_state.selected_portfolio = "Main"
+                    st.success("Logged in successfully")
+                    st.rerun()
+                else:
+                    st.error("Wrong password")
+
+    with tab2:
+        register_username = st.text_input("Username", key="register_username")
+        register_email = st.text_input("Email", key="register_email")
+        register_password = st.text_input("Password", type="password", key="register_password")
+
+        if st.button("Create Account"):
+            clean_username = register_username.strip()
+            clean_email = register_email.strip().lower()
+            clean_password = register_password.strip()
+
+            if not clean_username or not clean_email or not clean_password:
+                st.error("Fill in username, email, and password")
+            elif "@" not in clean_email or "." not in clean_email:
+                st.error("Enter a valid email")
+            elif clean_username in users:
+                st.error("Username already exists")
+            elif email_exists(clean_email):
+                st.error("Email already in use")
+            else:
+                users[clean_username] = {
+                    "password": hash_password(clean_password),
+                    "email": clean_email,
                     "visibility": "private",
-                    "user_id": generate_unique_user_id()
+                    "user_id": generate_unique_user_id(),
+                    "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 }
                 save_json(USERS_FILE, users)
 
-                portfolios[username] = {"Main": []}
-                history[username] = {"Main": []}
-                sales_history[username] = {"Main": []}
+                portfolios[clean_username] = {"Main": []}
+                history[clean_username] = {"Main": []}
+                sales_history[clean_username] = {"Main": []}
 
                 save_json(PORTFOLIO_FILE, portfolios)
                 save_json(HISTORY_FILE, history)
@@ -678,20 +815,57 @@ def login_page():
 
                 st.success("Account created. You can now log in.")
 
-    if mode == "Login":
-        if st.button("Login"):
-            if username in users and users[username]["password"] == hash_password(password):
-                st.session_state.logged_in = True
-                st.session_state.user = username
-                st.session_state.selected_portfolio = "Main"
-                st.rerun()
+    with tab3:
+        reset_email_input = st.text_input("Enter your account email", key="forgot_email")
+
+        if st.button("Send Reset Code"):
+            matched_username = get_username_from_email(reset_email_input)
+
+            if not matched_username:
+                st.error("No account found with that email")
             else:
-                st.error("Invalid login")
+                code = f"{secrets.randbelow(900000) + 100000}"
+                st.session_state.reset_code = code
+                st.session_state.reset_user = matched_username
+                st.session_state.reset_email = reset_email_input.strip().lower()
+                st.session_state.show_reset_form = True
+
+                sent, message = send_reset_email(
+                    to_email=st.session_state.reset_email,
+                    reset_code=code,
+                    username=matched_username
+                )
+
+                if sent:
+                    st.success("Reset code sent to your email")
+                else:
+                    st.error(message)
+
+        if st.session_state.show_reset_form:
+            st.markdown("### Enter Reset Code")
+            entered_code = st.text_input("Reset Code", key="entered_reset_code")
+            new_password = st.text_input("New Password", type="password", key="new_reset_password")
+
+            if st.button("Reset Password"):
+                if not entered_code or not new_password:
+                    st.error("Enter the reset code and a new password")
+                elif entered_code != st.session_state.reset_code:
+                    st.error("Invalid reset code")
+                else:
+                    reset_user = st.session_state.reset_user
+                    users[reset_user]["password"] = hash_password(new_password)
+                    save_json(USERS_FILE, users)
+
+                    st.session_state.reset_code = ""
+                    st.session_state.reset_user = ""
+                    st.session_state.reset_email = ""
+                    st.session_state.show_reset_form = False
+
+                    st.success("Password updated. You can now log in.")
 
     st.markdown("</div></div>", unsafe_allow_html=True)
-
 # =============================
-# DATA HELPERS
+# SEARCH / MARKET HELPERS
 # =============================
 @st.cache_data(ttl=3600)
 def get_symbol_search_map():
@@ -756,6 +930,15 @@ def resolve_ticker(user_input):
     return upper_value
 
 
+def calculate_change(current, previous):
+    if previous is None or previous <= 0:
+        return 0.0
+    return ((current - previous) / previous) * 100.0
+
+
+# =============================
+# PRICE / ANALYSIS HELPERS
+# =============================
 @st.cache_data(ttl=60)
 def get_price(ticker):
     try:
@@ -812,9 +995,136 @@ def get_market_frame(ticker):
 
 
 @st.cache_data(ttl=60)
+def get_extended_market_frame(ticker):
+    try:
+        if not ticker:
+            return pd.DataFrame()
+        df = yf.Ticker(ticker).history(period="1mo", interval="1h")
+        return df if df is not None else pd.DataFrame()
+    except Exception:
+        return pd.DataFrame()
+
+
+@st.cache_data(ttl=60)
 def get_asset_analysis(ticker):
     df = get_market_frame(ticker)
     return analyze_market_frame(df)
+
+
+def calculate_consistency_score(df):
+    if df is None or df.empty or "Close" not in df.columns or len(df) < 6:
+        return 0.0
+
+    close = df["Close"].dropna()
+    if len(close) < 6:
+        return 0.0
+
+    rises = 0
+    falls = 0
+
+    for i in range(1, len(close)):
+        if close.iloc[i] > close.iloc[i - 1]:
+            rises += 1
+        elif close.iloc[i] < close.iloc[i - 1]:
+            falls += 1
+
+    total = rises + falls
+    return (max(rises, falls) / total) if total > 0 else 0.0
+
+
+def calculate_volume_score(df):
+    if df is None or df.empty or "Volume" not in df.columns:
+        return 0.0
+
+    volume = df["Volume"].dropna()
+    if len(volume) < 10:
+        return 0.0
+
+    recent = volume.tail(5).mean()
+    base = volume.tail(20).mean() if len(volume) >= 20 else volume.mean()
+
+    return (recent - base) / base if base > 0 else 0.0
+
+
+def estimate_hold_window(change_1h, change_24h, change_7d, volatility_pct):
+    if change_1h > 0 and change_24h > 0 and volatility_pct < 1.2:
+        return "6–24 hours", "Short swing continuation likely"
+    if change_24h > 0 and change_7d > 0 and volatility_pct < 2.2:
+        return "1–3 days", "Momentum may continue over the next few sessions"
+    if change_7d > 0:
+        return "3–7 days", "Broader trend may keep pushing higher"
+    return "Watch only", "Setup is weaker right now"
+
+
+@st.cache_data(ttl=60)
+def get_ai_trade_idea(ticker):
+    extended = get_extended_market_frame(ticker)
+    analysis = get_asset_analysis(ticker)
+
+    change_1h = float(analysis.get("change_1h", 0))
+    change_24h = float(analysis.get("change_24h", 0))
+    volatility_pct = float(analysis.get("volatility_pct", 0))
+
+    change_7d = 0.0
+    try:
+        if extended is not None and not extended.empty and "Close" in extended.columns:
+            close = extended["Close"].dropna()
+            if len(close) > 168:
+                change_7d = ((close.iloc[-1] - close.iloc[-168]) / close.iloc[-168]) * 100
+    except Exception:
+        change_7d = 0.0
+
+    consistency = calculate_consistency_score(extended)
+    volume = calculate_volume_score(extended)
+
+    idea = score_trade_idea(
+        change_1h,
+        change_24h,
+        change_7d,
+        volatility_pct,
+        consistency,
+        volume
+    )
+
+    hold_window, hold_reason = estimate_hold_window(
+        change_1h,
+        change_24h,
+        change_7d,
+        volatility_pct
+    )
+
+    return {
+        "ticker": ticker,
+        "asset": ASSET_LABELS.get(ticker, ticker),
+        "price": get_price(ticker),
+        "trend": analysis.get("trend", "Neutral ➖"),
+        "volatility": analysis.get("volatility", "Low volatility 🟢"),
+        "change_1h": round(change_1h, 2),
+        "change_24h": round(change_24h, 2),
+        "change_7d": round(change_7d, 2),
+        "label": idea["label"],
+        "confidence": idea["confidence"],
+        "score": idea["score"],
+        "reasons": idea["reasons"],
+        "hold_window": hold_window,
+        "hold_reason": hold_reason,
+    }
+
+
+@st.cache_data(ttl=60)
+def build_ai_trade_ideas():
+    rows = []
+
+    for ticker in SCAN_UNIVERSE:
+        try:
+            rows.append(get_ai_trade_idea(ticker))
+        except Exception:
+            continue
+
+    if not rows:
+        return pd.DataFrame()
+
+    return pd.DataFrame(rows).sort_values("score", ascending=False).head(10)
 
 
 @st.cache_data(ttl=60)
@@ -848,6 +1158,9 @@ def build_suggested_assets():
     return pd.DataFrame(rows).sort_values("Score", ascending=False).head(8)
 
 
+# =============================
+# NEWS HELPERS
+# =============================
 @st.cache_data(ttl=120)
 def get_ticker_news(ticker, limit=12):
     try:
@@ -866,36 +1179,20 @@ def get_ticker_news(ticker, limit=12):
         for item in news_items[:limit]:
             content = item.get("content", {}) if isinstance(item, dict) else {}
 
-            title = (
-                content.get("title")
-                or item.get("title")
-                or "Untitled headline"
-            )
-
+            title = content.get("title") or item.get("title") or "Untitled headline"
             link = (
                 content.get("canonicalUrl", {}).get("url")
                 or content.get("clickThroughUrl", {}).get("url")
                 or item.get("link")
                 or ""
             )
-
             publisher = (
                 content.get("provider", {}).get("displayName")
                 or item.get("publisher")
                 or "Unknown source"
             )
-
-            published_at = (
-                content.get("pubDate")
-                or item.get("providerPublishTime")
-                or ""
-            )
-
-            summary = (
-                content.get("summary")
-                or item.get("summary")
-                or ""
-            )
+            published_at = content.get("pubDate") or item.get("providerPublishTime") or ""
+            summary = content.get("summary") or item.get("summary") or ""
 
             cleaned_items.append({
                 "title": title,
@@ -907,7 +1204,6 @@ def get_ticker_news(ticker, limit=12):
             })
 
         return cleaned_items
-
     except Exception:
         return []
 
@@ -925,10 +1221,7 @@ def get_multi_asset_news(tickers, limit_per_ticker=4, total_limit=16):
                 seen_links.add(link)
                 all_news.append(item)
 
-    def sort_key(item):
-        return str(item.get("published_at", ""))
-
-    all_news = sorted(all_news, key=sort_key, reverse=True)
+    all_news = sorted(all_news, key=lambda x: str(x.get("published_at", "")), reverse=True)
     return all_news[:total_limit]
 
 
@@ -959,7 +1252,6 @@ def is_preferred_news_source(item):
         "investopedia",
         "yahoo finance",
     ]
-
     return any(term in publisher or term in domain for term in preferred_terms)
 
 
@@ -974,815 +1266,464 @@ def split_news_by_quality(news_items):
             other.append(item)
 
     return preferred, other
-
-
-def get_user_portfolios(user):
-    if user not in portfolios:
-        portfolios[user] = {"Main": []}
-    elif isinstance(portfolios[user], list):
-        portfolios[user] = {"Main": portfolios[user]}
-    elif not isinstance(portfolios[user], dict):
-        portfolios[user] = {"Main": []}
-
-    if "Main" not in portfolios[user]:
-        portfolios[user]["Main"] = []
-
-    save_json(PORTFOLIO_FILE, portfolios)
-    return portfolios[user]
-
-
-def normalize_history_for_user(user):
-    if user not in history:
-        history[user] = {"Main": []}
-    elif isinstance(history[user], list):
-        history[user] = {"Main": history[user]}
-    elif not isinstance(history[user], dict):
-        history[user] = {"Main": []}
-
-    if "Main" not in history[user]:
-        history[user]["Main"] = []
-
-    save_json(HISTORY_FILE, history)
-
-
-def normalize_sales_for_user(user):
-    if user not in sales_history:
-        sales_history[user] = {"Main": []}
-    elif isinstance(sales_history[user], list):
-        sales_history[user] = {"Main": sales_history[user]}
-    elif not isinstance(sales_history[user], dict):
-        sales_history[user] = {"Main": []}
-
-    if "Main" not in sales_history[user]:
-        sales_history[user]["Main"] = []
-
-    save_json(SALES_FILE, sales_history)
-
-
-def get_current_portfolio():
-    return get_user_portfolios(st.session_state.user).get(
-        st.session_state.selected_portfolio, []
-    )
-
-
-def save_current_portfolio(updated):
-    user = st.session_state.user
-    portfolio_name = st.session_state.selected_portfolio
-
-    if user not in portfolios:
-        portfolios[user] = {}
-    if portfolio_name not in portfolios[user]:
-        portfolios[user][portfolio_name] = []
-
-    portfolios[user][portfolio_name] = updated
-    save_json(PORTFOLIO_FILE, portfolios)
-
-
-def get_current_history():
-    user = st.session_state.user
-    portfolio_name = st.session_state.selected_portfolio
-    normalize_history_for_user(user)
-    return history[user].get(portfolio_name, [])
-
-
-def save_current_history(updated):
-    user = st.session_state.user
-    portfolio_name = st.session_state.selected_portfolio
-    normalize_history_for_user(user)
-    history[user][portfolio_name] = updated
-    save_json(HISTORY_FILE, history)
-
-
-def get_current_sales():
-    user = st.session_state.user
-    portfolio_name = st.session_state.selected_portfolio
-    normalize_sales_for_user(user)
-    return sales_history[user].get(portfolio_name, [])
-
-
-def save_current_sales(updated):
-    user = st.session_state.user
-    portfolio_name = st.session_state.selected_portfolio
-    normalize_sales_for_user(user)
-    sales_history[user][portfolio_name] = updated
-    save_json(SALES_FILE, sales_history)
-
-
-def get_portfolio_value(portfolio):
-    total = 0.0
-    for trade in portfolio:
-        price = get_price(trade.get("Ticker"))
-        if price is not None:
-            total += price * trade.get("Shares", 0)
-    return total
-
-
-def build_portfolio_df(portfolio):
-    rows = []
-
-    for trade in portfolio:
-        ticker = trade.get("Ticker")
-        price = get_price(ticker)
-        if price is None:
-            continue
-
-        shares = float(trade.get("Shares", 0))
-        amount = float(trade.get("Amount", 0))
-        buy_price = float(trade.get("Price", 0))
-
-        value = price * shares
-        pl = value - amount
-
-        rows.append({
-            "Ticker": ticker,
-            "Shares": shares,
-            "Buy Price": buy_price,
-            "Amount": amount,
-            "Market Value": value,
-            "Unrealized P/L": pl,
-            "Time": trade.get("Time", "")
-        })
-
-    return pd.DataFrame(rows)
-
-
-def update_history_snapshot():
-    current_history = get_current_history()
-    current_value_now = get_portfolio_value(get_current_portfolio())
-    now_key = datetime.now().strftime("%Y-%m-%d %H:%M")
-
-    if not current_history or current_history[-1]["time"] != now_key:
-        current_history.append({
-            "time": now_key,
-            "value": current_value_now
-        })
-        save_current_history(current_history)
-
-
-def get_user_visibility(username):
-    if username in users:
-        return users[username].get("visibility", "private")
-    return "private"
-
-
-def set_user_visibility(username, visibility):
-    users[username]["visibility"] = visibility
-    save_json(USERS_FILE, users)
-
-
-def build_public_portfolio_allocations(username):
-    if username not in portfolios:
-        return pd.DataFrame()
-
-    user_all_portfolios = get_user_portfolios(username)
-    allocation = {}
-
-    for _, portfolio in user_all_portfolios.items():
-        for trade in portfolio:
-            ticker = trade.get("Ticker")
-            price = get_price(ticker)
-            if price is None:
-                continue
-
-            shares = float(trade.get("Shares", 0))
-            value = price * shares
-            allocation[ticker] = allocation.get(ticker, 0) + value
-
-    if not allocation:
-        return pd.DataFrame()
-
-    total = sum(allocation.values())
-    data = []
-
-    for ticker, value in allocation.items():
-        data.append({
-            "Ticker": ticker,
-            "Percent": (value / total) * 100
-        })
-
-    return pd.DataFrame(data).sort_values("Percent", ascending=False)
-
-
-@st.cache_data(ttl=60)
-def get_asset_comparison_metrics(ticker):
-    analysis = get_asset_analysis(ticker)
-
-    try:
-        data = yf.Ticker(ticker).history(period="10d")
-        if data is None or data.empty or "Close" not in data.columns:
-            change_7d = 0.0
-        else:
-            close = data["Close"].dropna()
-            if len(close) >= 2:
-                current = float(close.iloc[-1])
-                previous_7d = float(close.iloc[0])
-                change_7d = safe_pct_change(current, previous_7d)
-            else:
-                change_7d = 0.0
-    except Exception:
-        change_7d = 0.0
-
-    momentum_score = (
-        float(analysis.get("change_1h", 0)) * 0.4
-        + float(analysis.get("change_24h", 0)) * 0.4
-        + float(change_7d) * 0.2
-    )
-
-    return {
-        "ticker": ticker,
-        "change_1h": float(analysis.get("change_1h", 0)),
-        "change_24h": float(analysis.get("change_24h", 0)),
-        "change_7d": float(change_7d),
-        "volatility_pct": float(analysis.get("volatility_pct", 0)),
-        "volatility_label": analysis.get("volatility", "Low volatility 🟢"),
-        "trend": analysis.get("trend", "Neutral ➖"),
-        "momentum_score": momentum_score,
-    }
-
-
-def build_portfolio_recap(portfolio_df, history_rows, sales_rows):
-    daily_value_change, daily_pct_change = portfolio_change_summary(history_rows, lookback_points=1)
-    weekly_value_change, weekly_pct_change = portfolio_change_summary(history_rows, lookback_points=7)
-
-    portfolio_rows = portfolio_df.to_dict("records") if not portfolio_df.empty else []
-    best_trade_text, worst_trade_text = best_and_worst_assets_from_portfolio_rows(portfolio_rows)
-
-    wins, losses, win_rate = trade_win_rate(sales_rows)
-    consistency = consistency_ratio_from_history(history_rows)
-
-    overall_score = performance_score(
-        total_change_pct=weekly_pct_change,
-        win_rate_pct=win_rate,
-        consistency_ratio=consistency,
-    )
-
-    return {
-        "daily_value_change": daily_value_change,
-        "daily_pct_change": daily_pct_change,
-        "weekly_value_change": weekly_value_change,
-        "weekly_pct_change": weekly_pct_change,
-        "best_trade_text": best_trade_text,
-        "worst_trade_text": worst_trade_text,
-        "wins": wins,
-        "losses": losses,
-        "win_rate": win_rate,
-        "consistency": consistency,
-        "overall_score": overall_score,
-    }
-
-
-def build_public_profile_insights(username):
-    public_df = build_public_portfolio_allocations(username)
-    allocation_rows = public_df.to_dict("records") if not public_df.empty else []
-
-    user_history = history.get(username, {})
-    combined_history = []
-    if isinstance(user_history, dict):
-        for _, rows in user_history.items():
-            if isinstance(rows, list):
-                combined_history.extend(rows)
-        combined_history = sorted(combined_history, key=lambda x: str(x.get("time", "")))
-
-    user_sales = sales_history.get(username, {})
-    combined_sales = []
-    if isinstance(user_sales, dict):
-        for _, rows in user_sales.items():
-            if isinstance(rows, list):
-                combined_sales.extend(rows)
-
-    user_portfolios = get_user_portfolios(username)
-    combined_portfolio = []
-    for _, rows in user_portfolios.items():
-        if isinstance(rows, list):
-            combined_portfolio.extend(rows)
-
-    public_portfolio_df = build_portfolio_df(combined_portfolio)
-    public_rows = public_portfolio_df.to_dict("records") if not public_portfolio_df.empty else []
-
-    wins, losses, win_rate = trade_win_rate(combined_sales)
-    trend_text = trend_label_from_history(combined_history)
-    category_text = best_category_label(allocation_rows)
-    risk_text = risk_level_from_behavior(allocation_rows, combined_sales, public_rows)
-
-    return {
-        "win_rate": win_rate,
-        "trend_text": trend_text,
-        "category_text": category_text,
-        "risk_text": risk_text,
-    }
-
 # =============================
-# APP START
+# SIDEBAR NAVIGATION (FIXED)
 # =============================
-if not st.session_state.logged_in:
-    login_page()
-    st.stop()
+def sidebar():
+    with st.sidebar:
+        st.markdown("## 📊 TradeFlow")
 
-st_autorefresh(interval=60_000, key="tradeflow_live_refresh")
-
-user = st.session_state.user
-normalize_history_for_user(user)
-normalize_sales_for_user(user)
-user_portfolios = get_user_portfolios(user)
-
-if st.session_state.selected_portfolio not in user_portfolios:
-    st.session_state.selected_portfolio = "Main"
-
-current_portfolio = get_current_portfolio()
-update_history_snapshot()
-portfolio_df = build_portfolio_df(current_portfolio)
-
-alert_store = load_alert_store(ALERTS_FILE)
-
-seen_tickers = sorted({trade["Ticker"] for trade in current_portfolio})
-for ticker in seen_tickers:
-    latest_price = get_price(ticker)
-    if latest_price is not None:
-        update_price_and_generate_alerts(
-            store=alert_store,
-            username=user,
-            ticker=ticker,
-            price=latest_price,
+        st.session_state.page = st.radio(
+            "Navigation",
+            ["Home", "Portfolio", "AI Suggestions", "Market", "News", "Settings"]
         )
 
-save_alert_store(ALERTS_FILE, alert_store)
-recent_alerts = get_recent_events(alert_store, user, limit=12)
+        st.markdown("---")
 
-current_history_rows = get_current_history()
-current_sales_rows = get_current_sales()
-current_recap = build_portfolio_recap(portfolio_df, current_history_rows, current_sales_rows)
+        user = st.session_state.user
 
-# =============================
-# SIDEBAR
-# =============================
-st.sidebar.title("TradeFlow")
+        # =============================
+        # MULTI-PORTFOLIO SUPPORT (FIXED)
+        # =============================
+        user_portfolios = portfolios.get(user, {"Main": []})
 
-page = st.sidebar.radio(
-    "Navigation",
-    ["Home", "Stock Viewer", "Compare Assets", "News", "Profiles", "Settings", "History"]
-)
-st.session_state.page = page
+        portfolio_names = list(user_portfolios.keys())
 
-st.sidebar.markdown("---")
-st.sidebar.subheader("Portfolios")
+        selected = st.selectbox(
+            "Select Portfolio",
+            portfolio_names,
+            index=portfolio_names.index(st.session_state.selected_portfolio)
+            if st.session_state.selected_portfolio in portfolio_names else 0
+        )
 
-portfolio_names = list(user_portfolios.keys())
+        st.session_state.selected_portfolio = selected
 
-selected_portfolio = st.sidebar.selectbox(
-    "Select Portfolio",
-    portfolio_names,
-    index=portfolio_names.index(st.session_state.selected_portfolio)
-)
-st.session_state.selected_portfolio = selected_portfolio
+        # ➕ Create new portfolio (THIS WAS MISSING)
+        new_portfolio_name = st.text_input("New Portfolio Name")
 
-current_portfolio = get_current_portfolio()
-portfolio_df = build_portfolio_df(current_portfolio)
+        if st.button("➕ Add Portfolio"):
+            if new_portfolio_name.strip():
+                if new_portfolio_name not in user_portfolios:
+                    portfolios[user][new_portfolio_name] = []
+                    history[user][new_portfolio_name] = []
+                    sales_history[user][new_portfolio_name] = []
 
-new_portfolio_name = st.sidebar.text_input("New Portfolio Name")
+                    save_json(PORTFOLIO_FILE, portfolios)
+                    save_json(HISTORY_FILE, history)
+                    save_json(SALES_FILE, sales_history)
 
-if st.sidebar.button("Create Portfolio"):
-    clean_name = new_portfolio_name.strip()
+                    st.success("Portfolio created")
+                    st.rerun()
+                else:
+                    st.error("Portfolio already exists")
 
-    if not clean_name:
-        st.sidebar.error("Enter a portfolio name")
-    elif clean_name in user_portfolios:
-        st.sidebar.error("Portfolio already exists")
-    else:
-        user_portfolios[clean_name] = []
-        portfolios[user] = user_portfolios
-        save_json(PORTFOLIO_FILE, portfolios)
+        st.markdown("---")
 
-        if user not in history or not isinstance(history[user], dict):
-            history[user] = {"Main": []}
-        history[user][clean_name] = []
-        save_json(HISTORY_FILE, history)
+        # 👤 USER INFO
+        user_info = users.get(user, {})
+        st.markdown(f"👤 **{user}**")
+        st.caption(f"ID: {user_info.get('user_id', '')}")
 
-        if user not in sales_history or not isinstance(sales_history[user], dict):
-            sales_history[user] = {"Main": []}
-        sales_history[user][clean_name] = []
-        save_json(SALES_FILE, sales_history)
+        if st.button("Logout"):
+            st.session_state.logged_in = False
+            st.session_state.user = ""
+            st.rerun()
 
-        st.session_state.selected_portfolio = clean_name
-        st.rerun()
-
-if st.sidebar.button("Logout"):
-    st.session_state.logged_in = False
-    st.session_state.user = ""
-    st.session_state.selected_portfolio = "Main"
-    st.rerun()
 
 # =============================
-# HOME PAGE
+# PORTFOLIO HELPERS
 # =============================
-if st.session_state.page == "Home":
-    invested = float(portfolio_df["Amount"].sum()) if not portfolio_df.empty else 0.0
-    current_value = float(portfolio_df["Market Value"].sum()) if not portfolio_df.empty else 0.0
-    unrealized_profit = current_value - invested
-    pnl_pct = (unrealized_profit / invested * 100) if invested > 0 else 0.0
-    portfolio_count = len(user_portfolios)
+def get_current_portfolio():
+    user = st.session_state.user
+    portfolio_name = st.session_state.selected_portfolio
 
-    st.markdown(f"<div class='main-title'>Welcome back, {user}</div>", unsafe_allow_html=True)
-    st.markdown("<div class='subtitle'>Your trading dashboard overview</div>", unsafe_allow_html=True)
+    return portfolios.get(user, {}).get(portfolio_name, [])
+
+
+def save_current_portfolio(data):
+    user = st.session_state.user
+    portfolio_name = st.session_state.selected_portfolio
+
+    portfolios[user][portfolio_name] = data
+    save_json(PORTFOLIO_FILE, portfolios)
+
+
+# =============================
+# HOME PAGE (FIXES BLANK MIDDLE)
+# =============================
+def home_page():
+    st.markdown('<div class="main-title">Dashboard</div>', unsafe_allow_html=True)
+    st.markdown('<div class="subtitle">Overview of your trading activity</div>', unsafe_allow_html=True)
+
+    portfolio = get_current_portfolio()
+
+    total_value = 0
+    total_change = 0
+
+    for item in portfolio:
+        ticker = item.get("ticker")
+        shares = item.get("shares", 0)
+
+        price, change = get_price_and_change(ticker)
+
+        if price:
+            total_value += price * shares
+        if change:
+            total_change += change
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.markdown(f"""
+        <div class="metric-card metric-blue">
+            <div class="metric-label">Portfolio Value</div>
+            <div class="metric-value">${total_value:,.2f}</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col2:
+        st.markdown(f"""
+        <div class="metric-card metric-green">
+            <div class="metric-label">Avg Change</div>
+            <div class="metric-value">{round(total_change,2)}%</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col3:
+        st.markdown(f"""
+        <div class="metric-card metric-white">
+            <div class="metric-label">Assets</div>
+            <div class="metric-value">{len(portfolio)}</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    st.markdown("---")
+
+    # 🔥 THIS FIXES THE "EMPTY BLACK SPACE"
+    st.markdown("## 🚀 Quick Actions")
+
+    colA, colB = st.columns(2)
+
+    with colA:
+        ticker = st.text_input("Add Stock (Ticker)")
+        shares = st.number_input("Shares", min_value=1, step=1)
+
+        if st.button("➕ Add to Portfolio"):
+            if ticker:
+                portfolio.append({
+                    "ticker": ticker.upper(),
+                    "shares": shares
+                })
+                save_current_portfolio(portfolio)
+                st.success("Added")
+                st.rerun()
+
+    with colB:
+        st.markdown("### 📈 Quick Market View")
+
+        for t in ["AAPL", "TSLA", "NVDA"]:
+            price, change = get_price_and_change(t)
+            if price:
+                st.write(f"{t}: ${round(price,2)} ({round(change,2)}%)")
+
+# =============================
+# PORTFOLIO PAGE
+# =============================
+def portfolio_page():
+    st.markdown('<div class="main-title">Portfolio</div>', unsafe_allow_html=True)
+    st.markdown(
+        f'<div class="subtitle">Current portfolio: {st.session_state.selected_portfolio}</div>',
+        unsafe_allow_html=True
+    )
+
+    portfolio = get_current_portfolio()
+    df = build_portfolio_df(portfolio)
+
+    if df.empty:
+        st.info("No holdings yet in this portfolio.")
+        return
+
+    total_value = float(df["Value"].sum())
+    total_profit = float(df["Profit"].sum())
+    total_pct = (total_profit / (total_value - total_profit) * 100) if total_value > total_profit else 0.0
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.markdown(f"""
+        <div class="metric-card metric-blue">
+            <div class="metric-label">Portfolio Value</div>
+            <div class="metric-value">${total_value:,.2f}</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col2:
+        st.markdown(f"""
+        <div class="metric-card metric-green">
+            <div class="metric-label">Total Profit</div>
+            <div class="metric-value">${total_profit:,.2f}</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col3:
+        st.markdown(f"""
+        <div class="metric-card metric-white">
+            <div class="metric-label">Return %</div>
+            <div class="metric-value">{total_pct:.2f}%</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    st.markdown("---")
+    st.dataframe(df, use_container_width=True)
+
+    st.markdown("## Manage Holdings")
+
+    for i, row in df.iterrows():
+        st.markdown(f"### {row['Ticker']}")
+        c1, c2 = st.columns(2)
+
+        with c1:
+            sell_shares = st.number_input(
+                f"Sell shares of {row['Ticker']}",
+                min_value=1,
+                max_value=max(1, int(row["Shares"])),
+                step=1,
+                key=f"sell_qty_{i}"
+            )
+
+        with c2:
+            if st.button(f"Sell {row['Ticker']}", key=f"sell_btn_{i}"):
+                updated = []
+                sold_ticker = row["Ticker"]
+
+                for item in portfolio:
+                    if item.get("ticker") == sold_ticker:
+                        current_shares = float(item.get("shares", 0))
+                        if current_shares > sell_shares:
+                            item["shares"] = current_shares - sell_shares
+                            updated.append(item)
+                        elif current_shares == sell_shares:
+                            pass
+                        else:
+                            updated.append(item)
+                    else:
+                        updated.append(item)
+
+                save_current_portfolio(updated)
+                st.success(f"Sold {sell_shares} share(s) of {sold_ticker}")
+                st.rerun()
+
+        if st.button(f"Remove {row['Ticker']} completely", key=f"remove_btn_{i}"):
+            updated = [item for item in portfolio if item.get("ticker") != row["Ticker"]]
+            save_current_portfolio(updated)
+            st.success(f"Removed {row['Ticker']}")
+            st.rerun()
+
+        st.markdown("---")
+
+
+# =============================
+# AI SUGGESTIONS PAGE
+# =============================
+def ai_suggestions_page():
+    st.markdown('<div class="main-title">AI Suggestions</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="subtitle">Ideas based on momentum, volatility, consistency, and volume</div>',
+        unsafe_allow_html=True
+    )
+
+    ideas = build_ai_trade_ideas()
+
+    if ideas.empty:
+        st.warning("No AI ideas found right now.")
+        return
+
+    top = ideas.iloc[0]
 
     st.markdown(f"""
-    <div class='card' style='margin-bottom:18px;'>
-        <div class='section-title'>Market Snapshot</div>
-        <div style='display:flex; gap:18px; flex-wrap:wrap;'>
-            <div><strong>Profiles</strong><br><span style='color:#627d98;'>Public or private sharing</span></div>
-            <div><strong>Selected Portfolio</strong><br><span style='color:#627d98;'>{st.session_state.selected_portfolio}</span></div>
-            <div><strong>Profile Status</strong><br><span style='color:#627d98;'>{get_user_visibility(user).title()}</span></div>
-        </div>
+    <div class="card">
+        <div class="section-title">Top Pick</div>
+        <p><strong>{top['asset']} ({top['ticker']})</strong></p>
+        <p>Signal: {top['label']}</p>
+        <p>Confidence: {top['confidence']}%</p>
+        <p>Trend: {top['trend']}</p>
+        <p>Volatility: {top['volatility']}</p>
+        <p>1H: {top['change_1h']:+.2f}% | 24H: {top['change_24h']:+.2f}% | 7D: {top['change_7d']:+.2f}%</p>
+        <p>Hold window: {top['hold_window']}</p>
+        <p>{top['hold_reason']}</p>
     </div>
     """, unsafe_allow_html=True)
 
-    recap_col1, recap_col2, recap_col3, recap_col4 = st.columns(4)
+    st.markdown("---")
+    st.markdown("## Ranked Suggestions")
 
-    with recap_col1:
+    portfolio = get_current_portfolio()
+
+    for i, row in ideas.iterrows():
         st.markdown(f"""
-        <div class="metric-card metric-blue">
-            <div class="metric-label">TODAY</div>
-            <div class="metric-value">{current_recap['daily_pct_change']:+.2f}%</div>
-            <div class="metric-sub">{current_recap['daily_value_change']:+.2f}$</div>
+        <div class="card">
+            <div class="section-title">{row['asset']} ({row['ticker']})</div>
+            <p><strong>Signal:</strong> {row['label']}</p>
+            <p><strong>Confidence:</strong> {row['confidence']}%</p>
+            <p><strong>Trend:</strong> {row['trend']}</p>
+            <p><strong>Volatility:</strong> {row['volatility']}</p>
+            <p><strong>1H:</strong> {row['change_1h']:+.2f}% |
+               <strong>24H:</strong> {row['change_24h']:+.2f}% |
+               <strong>7D:</strong> {row['change_7d']:+.2f}%</p>
+            <p><strong>Hold:</strong> {row['hold_window']}</p>
+            <p>{row['hold_reason']}</p>
         </div>
         """, unsafe_allow_html=True)
 
-    with recap_col2:
-        st.markdown(f"""
-        <div class="metric-card metric-green">
-            <div class="metric-label">THIS WEEK</div>
-            <div class="metric-value">{current_recap['weekly_pct_change']:+.2f}%</div>
-            <div class="metric-sub">{current_recap['weekly_value_change']:+.2f}$</div>
-        </div>
-        """, unsafe_allow_html=True)
+        c1, c2, c3 = st.columns(3)
 
-    with recap_col3:
-        st.markdown(f"""
-        <div class="metric-card metric-white">
-            <div class="metric-label">WIN RATE</div>
-            <div class="metric-value">{current_recap['win_rate']:.1f}%</div>
-            <div class="metric-sub">{current_recap['wins']} wins / {current_recap['losses']} losses</div>
-        </div>
-        """, unsafe_allow_html=True)
+        with c1:
+            if st.button(f"Search {row['ticker']}", key=f"ai_search_{i}"):
+                st.session_state.suggested_search_value = row["ticker"]
+                st.session_state.page = "Market"
+                st.rerun()
 
-    with recap_col4:
-        st.markdown(f"""
-        <div class="metric-card metric-blue">
-            <div class="metric-label">PERFORMANCE SCORE</div>
-            <div class="metric-value">{current_recap['overall_score']}</div>
-            <div class="metric-sub">Overall recap</div>
-        </div>
-        """, unsafe_allow_html=True)
-
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    st.markdown("<div class='card'>", unsafe_allow_html=True)
-    st.markdown("<div class='section-title'>Performance Recap</div>", unsafe_allow_html=True)
-    st.write(f"**Best performing asset:** {current_recap['best_trade_text']}")
-    st.write(f"**Worst performing asset:** {current_recap['worst_trade_text']}")
-    st.write(f"**Profitable trades:** {current_recap['wins']}")
-    st.write(f"**Losing trades:** {current_recap['losses']}")
-    st.markdown("</div>", unsafe_allow_html=True)
-
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    left, right = st.columns([1.2, 1])
-
-    with left:
-        st.markdown("<div class='card'>", unsafe_allow_html=True)
-        st.markdown("<div class='section-title'>Your Holdings</div>", unsafe_allow_html=True)
-
-        if not portfolio_df.empty:
-            for _, row in portfolio_df.iterrows():
-                analysis = get_asset_analysis(row["Ticker"])
-                pct_class = "portfolio-pct-up" if row["Unrealized P/L"] >= 0 else "portfolio-pct-down"
-
-                st.markdown(f"""
-                <div class="portfolio-row">
-                    <div class="portfolio-left">
-                        <div class="portfolio-icon icon-blue">{row['Ticker'][0]}</div>
-                        <div>
-                            <div class="portfolio-name">{row['Ticker']}</div>
-                            <div class="portfolio-meta">
-                                {row['Shares']:.4f} shares • {analysis['trend']} • {analysis['volatility']}
-                            </div>
-                        </div>
-                    </div>
-                    <div class="portfolio-value">
-                        <div class="portfolio-money">${row['Market Value']:,.2f}</div>
-                        <div class="{pct_class}">${row['Unrealized P/L']:,.2f}</div>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-        else:
-            st.info("No holdings yet. Buy a stock in Stock Viewer.")
-
-        st.markdown("</div>", unsafe_allow_html=True)
-
-    with right:
-        st.markdown("<div class='card'>", unsafe_allow_html=True)
-        st.markdown("<div class='section-title'>Portfolio Alerts</div>", unsafe_allow_html=True)
-
-        if recent_alerts:
-            for event in recent_alerts:
-                st.markdown(
-                    f"**{event['ticker']}** — {event['message']} "
-                    f"({event['pct_change']:+.2f}%)"
-                )
-        else:
-            st.info("No portfolio alerts yet.")
-
-        st.markdown("</div>", unsafe_allow_html=True)
-
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    bottom_left, bottom_right = st.columns([1.2, 1])
-
-    with bottom_left:
-        st.markdown("<div class='card'>", unsafe_allow_html=True)
-        st.markdown("<div class='section-title'>Suggested for You</div>", unsafe_allow_html=True)
-
-        suggested_df = build_suggested_assets()
-        if not suggested_df.empty:
-            for idx, row in suggested_df.iterrows():
-                st.markdown(
-                    f"**{row['Asset']} ({row['Ticker']})** — {row['Tag']}  \n"
-                    f"{row['Trend']} • {row['Volatility']} • "
-                    f"1H: {row['1H %']:+.2f}% • 24H: {row['24H %']:+.2f}%"
-                )
-
-                col_a, col_b = st.columns(2)
-
-                with col_a:
-                    if st.button(f"Search {row['Ticker']}", key=f"search_{idx}"):
-                        st.session_state["suggested_search_value"] = row["Ticker"]
-                        st.success(f"Go to Stock Viewer and search {row['Ticker']}")
-
-                with col_b:
-                    if st.button(f"Add {row['Ticker']}", key=f"add_{idx}"):
-                        add_price = get_price(row["Ticker"])
-                        if add_price is not None:
-                            default_amount = 100.0
-                            trade = {
-                                "Ticker": row["Ticker"],
-                                "Amount": default_amount,
-                                "Price": add_price,
-                                "Shares": default_amount / add_price,
-                                "Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                            }
-                            current_portfolio.append(trade)
-                            save_current_portfolio(current_portfolio)
-                            st.success(f"Added {row['Ticker']} to portfolio")
-                            st.rerun()
-                        else:
-                            st.error("Could not fetch latest price.")
-
-                st.markdown("---")
-        else:
-            st.info("No strong growth candidates right now.")
-
-        st.markdown("### Quick Add to Portfolio")
-        add_search = st.text_input(
-            "Search a stock or crypto to add",
-            placeholder="Example: Apple, Tesla, Bitcoin, AAPL",
-            key="home_add_search"
-        )
-        add_ticker = resolve_ticker(add_search)
-
-        if add_search and add_ticker:
-            add_price = get_price(add_ticker)
-
-            if add_price is not None:
-                st.write(f"**Found:** {add_ticker} — ${add_price:.2f}")
-
-                add_amount = st.number_input(
-                    "Amount to invest ($)",
-                    min_value=1.0,
-                    value=100.0,
-                    key="home_add_amount"
-                )
-
-                if st.button("Add to Current Portfolio", key="home_add_btn"):
-                    trade = {
-                        "Ticker": add_ticker,
-                        "Amount": add_amount,
-                        "Price": add_price,
-                        "Shares": add_amount / add_price,
-                        "Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    }
-                    current_portfolio.append(trade)
-                    save_current_portfolio(current_portfolio)
-                    st.success(f"Added {add_ticker} to {st.session_state.selected_portfolio}")
-                    st.rerun()
-            else:
-                st.warning("Could not find that stock or crypto.")
-
-        st.markdown("</div>", unsafe_allow_html=True)
-
-    with bottom_right:
-        st.markdown("<div class='card'>", unsafe_allow_html=True)
-        st.markdown("<div class='section-title'>Watchlist</div>", unsafe_allow_html=True)
-
-        watch_search = st.text_input(
-            "Add to watchlist",
-            placeholder="Type Apple, Tesla, Bitcoin, AAPL...",
-            key="watchlist_search"
-        )
-        watch_ticker = resolve_ticker(watch_search)
-
-        if st.button("Add to Watchlist", key="watchlist_add_btn"):
-            if watch_ticker:
-                if watch_ticker not in st.session_state.watchlist:
-                    st.session_state.watchlist.append(watch_ticker)
-                    st.success(f"Added {watch_ticker} to watchlist")
+        with c2:
+            if st.button(f"Buy $100 of {row['ticker']}", key=f"ai_buy_{i}"):
+                price = get_price(row["ticker"])
+                if price:
+                    shares = round(100 / price, 6)
+                    portfolio.append({
+                        "ticker": row["ticker"],
+                        "shares": shares,
+                        "avg_price": price
+                    })
+                    save_current_portfolio(portfolio)
+                    st.success(f"Bought ${100} of {row['ticker']}")
                     st.rerun()
                 else:
-                    st.info(f"{watch_ticker} is already in your watchlist")
-            else:
-                st.warning("Enter a stock or crypto name")
+                    st.error("Could not fetch latest price")
 
-        for idx, ticker in enumerate(st.session_state.watchlist):
-            price, change = get_price_and_change(ticker)
-            change_class = "watch-change-up" if (change is not None and change >= 0) else "watch-change-down"
-            change_sign = "+" if (change is not None and change >= 0) else ""
-            price_text = f"${price:,.2f}" if price is not None else "N/A"
-            change_text = f"{change_sign}{change:.2f}%" if change is not None else "N/A"
-
-            row_left, row_right = st.columns([5, 1])
-
-            with row_left:
-                st.markdown(f"""
-                <div class="watch-row">
-                    <div class="watch-left">
-                        <div class="watch-logo">{ticker[0]}</div>
-                        <div>
-                            <div class="watch-name">{ticker}</div>
-                            <div class="watch-sub">Live price</div>
-                        </div>
-                    </div>
-                    <div class="watch-price">
-                        <div>{price_text}</div>
-                        <div class="{change_class}">{change_text}</div>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-
-            with row_right:
-                if st.button("X", key=f"remove_watch_{idx}"):
-                    st.session_state.watchlist.pop(idx)
+        with c3:
+            custom_amount = st.number_input(
+                f"Custom buy amount for {row['ticker']}",
+                min_value=1.0,
+                value=250.0,
+                step=1.0,
+                key=f"ai_custom_amount_{i}"
+            )
+            if st.button(f"Buy custom {row['ticker']}", key=f"ai_buy_custom_{i}"):
+                price = get_price(row["ticker"])
+                if price:
+                    shares = round(custom_amount / price, 6)
+                    portfolio.append({
+                        "ticker": row["ticker"],
+                        "shares": shares,
+                        "avg_price": price
+                    })
+                    save_current_portfolio(portfolio)
+                    st.success(f"Bought ${custom_amount:.2f} of {row['ticker']}")
                     st.rerun()
+                else:
+                    st.error("Could not fetch latest price")
 
-        st.markdown("</div>", unsafe_allow_html=True)
-
+        st.markdown("---")
 # =============================
-# STOCK VIEWER
+# MARKET PAGE
 # =============================
-elif st.session_state.page == "Stock Viewer":
-    st.subheader("Stock Viewer")
+def market_page():
+    st.markdown('<div class="main-title">Market</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="subtitle">Search stocks and crypto, view price, and quick-buy</div>',
+        unsafe_allow_html=True
+    )
 
     default_search = st.session_state.get("suggested_search_value", "")
     search_input = st.text_input(
-        "Enter stock or crypto name/ticker (e.g. Apple, AAPL, Bitcoin, BTC-USD)",
-        value=default_search
+        "Search by name or ticker",
+        value=default_search,
+        placeholder="Apple, AAPL, Bitcoin, BTC-USD"
     )
 
     ticker = resolve_ticker(search_input)
 
     if search_input:
-        st.session_state["suggested_search_value"] = search_input
+        st.session_state.suggested_search_value = search_input
 
-    if ticker:
-        price = get_price(ticker)
+    if not ticker:
+        st.info("Enter a stock or crypto to begin.")
+        return
 
-        if price:
-            analysis = get_asset_analysis(ticker)
+    price, change = get_price_and_change(ticker)
 
-            st.success(f"{ticker} Price: ${price:.2f}")
-            st.write(f"**Trend:** {analysis['trend']}")
-            st.write(f"**Volatility:** {analysis['volatility']}")
-            st.write(f"**1H Change:** {analysis['change_1h']:+.2f}%")
-            st.write(f"**24H Change:** {analysis['change_24h']:+.2f}%")
+    if price is None:
+        st.error("Could not find that ticker.")
+        return
 
-            spike_msg = None
-            if analysis["change_5m"] >= 1.0:
-                spike_msg = "Spike up 📈"
-            elif analysis["change_5m"] <= -1.0:
-                spike_msg = "Drop down 📉"
+    analysis = get_asset_analysis(ticker)
 
-            if spike_msg:
-                st.warning(f"{spike_msg} ({analysis['change_5m']:+.2f}% over ~5m)")
-
-            amount = st.number_input("Amount to invest ($)", value=100.0, min_value=1.0)
-
-            if st.button("Add to Portfolio"):
-                trade = {
-                    "Ticker": ticker,
-                    "Amount": amount,
-                    "Price": price,
-                    "Shares": amount / price,
-                    "Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                }
-
-                current_portfolio.append(trade)
-                save_current_portfolio(current_portfolio)
-                st.success(f"Bought {ticker}")
-                st.rerun()
-        else:
-            st.error("Invalid ticker or name")
-
-# =============================
-# COMPARE ASSETS
-# =============================
-elif st.session_state.page == "Compare Assets":
-    st.subheader("Asset Comparison")
-
-    col1, col2 = st.columns(2)
-
+    col1, col2, col3 = st.columns(3)
     with col1:
-        left_input = st.text_input("Left asset", placeholder="BTC, Apple, AAPL, ETH-USD", key="compare_left")
+        st.metric("Ticker", ticker)
     with col2:
-        right_input = st.text_input("Right asset", placeholder="ETH, Tesla, TSLA, BTC-USD", key="compare_right")
+        st.metric("Price", f"${price:,.2f}")
+    with col3:
+        st.metric("24H Change", f"{change:+.2f}%" if change is not None else "N/A")
 
-    left_ticker = resolve_ticker(left_input)
-    right_ticker = resolve_ticker(right_input)
+    st.markdown(f"""
+    <div class="card">
+        <div class="section-title">{ticker} Overview</div>
+        <p><strong>Trend:</strong> {analysis.get('trend', 'Neutral')}</p>
+        <p><strong>Volatility:</strong> {analysis.get('volatility', 'Unknown')}</p>
+        <p><strong>1H Change:</strong> {analysis.get('change_1h', 0):+.2f}%</p>
+        <p><strong>24H Change:</strong> {analysis.get('change_24h', 0):+.2f}%</p>
+    </div>
+    """, unsafe_allow_html=True)
 
-    if left_ticker and right_ticker:
-        left_price = get_price(left_ticker)
-        right_price = get_price(right_ticker)
+    df = get_extended_market_frame(ticker)
+    if not df.empty and "Close" in df.columns:
+        st.markdown("### Price Chart")
+        st.line_chart(df["Close"])
 
-        if left_price is not None and right_price is not None:
-            left_metrics = get_asset_comparison_metrics(left_ticker)
-            right_metrics = get_asset_comparison_metrics(right_ticker)
-            winner_text = compare_asset_strength(left_metrics, right_metrics)
+    st.markdown("### Quick Buy")
+    amount = st.number_input("Amount to invest ($)", min_value=1.0, value=100.0, step=1.0, key="market_buy_amount")
 
-            left_score = left_metrics["momentum_score"] - left_metrics["volatility_pct"] * 0.2
-            right_score = right_metrics["momentum_score"] - right_metrics["volatility_pct"] * 0.2
+    if st.button("Buy This Asset", key="market_buy_btn"):
+        portfolio = get_current_portfolio()
+        shares = round(amount / price, 6)
+        portfolio.append({
+            "ticker": ticker,
+            "shares": shares,
+            "avg_price": price
+        })
+        save_current_portfolio(portfolio)
+        st.success(f"Bought ${amount:.2f} of {ticker}")
+        st.rerun()
 
-            left_label = "🏆 Stronger recently" if left_score > right_score else ""
-            right_label = "🏆 Stronger recently" if right_score > left_score else ""
-
-            compare_left, compare_right = st.columns(2)
-
-            with compare_left:
-                st.markdown("<div class='card'>", unsafe_allow_html=True)
-                st.markdown(f"### {left_ticker} {left_label}")
-                st.write(f"**1H:** {left_metrics['change_1h']:+.2f}%")
-                st.write(f"**24H:** {left_metrics['change_24h']:+.2f}%")
-                st.write(f"**7D:** {left_metrics['change_7d']:+.2f}%")
-                st.write(f"**Volatility:** {left_metrics['volatility_label']}")
-                st.write(f"**Trend:** {left_metrics['trend']}")
-                st.write(f"**Momentum score:** {left_metrics['momentum_score']:+.2f}")
-                st.markdown("</div>", unsafe_allow_html=True)
-
-            with compare_right:
-                st.markdown("<div class='card'>", unsafe_allow_html=True)
-                st.markdown(f"### {right_ticker} {right_label}")
-                st.write(f"**1H:** {right_metrics['change_1h']:+.2f}%")
-                st.write(f"**24H:** {right_metrics['change_24h']:+.2f}%")
-                st.write(f"**7D:** {right_metrics['change_7d']:+.2f}%")
-                st.write(f"**Volatility:** {right_metrics['volatility_label']}")
-                st.write(f"**Trend:** {right_metrics['trend']}")
-                st.write(f"**Momentum score:** {right_metrics['momentum_score']:+.2f}")
-                st.markdown("</div>", unsafe_allow_html=True)
-
-            st.info(winner_text)
-        else:
-            st.error("Could not find one or both assets.")
 
 # =============================
-# NEWS
+# NEWS PAGE
 # =============================
-elif st.session_state.page == "News":
-    st.subheader("Market News")
-    st.caption("News updates automatically about every 2 minutes.")
+def news_page():
+    st.markdown('<div class="main-title">News</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="subtitle">Latest market headlines from tracked assets</div>',
+        unsafe_allow_html=True
+    )
 
     news_mode = st.radio(
         "News Source",
-        ["My Watchlist", "My Portfolio", "Search Ticker"],
+        ["AI Picks", "Search Ticker"],
         horizontal=True
     )
 
     selected_news = []
 
-    if news_mode == "My Watchlist":
-        tickers = st.session_state.watchlist[:8]
-        selected_news = get_multi_asset_news(tickers, limit_per_ticker=4, total_limit=20)
-
-    elif news_mode == "My Portfolio":
-        portfolio_tickers = sorted({
-            trade.get("Ticker", "")
-            for trade in current_portfolio
-            if trade.get("Ticker")
-        })
-        selected_news = get_multi_asset_news(portfolio_tickers[:8], limit_per_ticker=4, total_limit=20)
+    if news_mode == "AI Picks":
+        ideas = build_ai_trade_ideas()
+        ai_tickers = ideas["ticker"].tolist()[:6] if not ideas.empty else []
+        selected_news = get_multi_asset_news(ai_tickers, limit_per_ticker=3, total_limit=18)
 
     elif news_mode == "Search Ticker":
-        search_input = st.text_input(
-            "Search stock or crypto news",
-            placeholder="Example: Apple, Tesla, Bitcoin, AAPL"
-        )
-        resolved = resolve_ticker(search_input)
+        news_search = st.text_input("Search ticker for news", placeholder="AAPL, TSLA, BTC-USD")
+        resolved = resolve_ticker(news_search)
 
-        if search_input and resolved:
+        if news_search and resolved:
             st.write(f"Showing headlines for **{resolved}**")
             selected_news = get_ticker_news(resolved, limit=15)
 
@@ -1790,135 +1731,260 @@ elif st.session_state.page == "News":
 
     if selected_news:
         top_story = selected_news[0]
-        st.markdown("<div class='card'>", unsafe_allow_html=True)
-        st.markdown("### Top Story")
-        st.markdown(f"**{top_story['title']}**")
-        st.caption(f"{top_story['publisher']} • {top_story.get('ticker', '')}")
-        if top_story.get("summary"):
-            st.write(top_story["summary"])
-        if top_story.get("link"):
-            st.markdown(f"[Open article]({top_story['link']})")
-        st.markdown("</div>", unsafe_allow_html=True)
+        st.markdown(f"""
+        <div class="card">
+            <div class="section-title">Top Story</div>
+            <p><strong><a href="{top_story['link']}" target="_blank">{top_story['title']}</a></strong></p>
+            <p>{top_story['publisher']} • {top_story.get('ticker', '')}</p>
+            <p>{top_story.get('summary', '')}</p>
+        </div>
+        """, unsafe_allow_html=True)
 
     if preferred_news:
         st.markdown("### Preferred Sources")
         start_index = 1 if selected_news and preferred_news and preferred_news[0]["title"] == selected_news[0]["title"] else 0
         for item in preferred_news[start_index:]:
-            st.markdown("<div class='card'>", unsafe_allow_html=True)
-            st.markdown(f"**{item['title']}**")
-            st.caption(f"{item['publisher']} • {item.get('ticker', '')}")
-            if item.get("summary"):
-                st.write(item["summary"])
-            if item.get("link"):
-                st.markdown(f"[Open article]({item['link']})")
-            st.markdown("</div>", unsafe_allow_html=True)
+            st.markdown(f"""
+            <div class="card">
+                <p><strong><a href="{item['link']}" target="_blank">{item['title']}</a></strong></p>
+                <p>{item['publisher']} • {item.get('ticker', '')}</p>
+                <p>{item.get('summary', '')}</p>
+            </div>
+            """, unsafe_allow_html=True)
 
     if other_news:
         st.markdown("### More Headlines")
         for item in other_news:
-            st.markdown("<div class='card'>", unsafe_allow_html=True)
-            st.markdown(f"**{item['title']}**")
-            st.caption(f"{item['publisher']} • {item.get('ticker', '')}")
-            if item.get("summary"):
-                st.write(item["summary"])
-            if item.get("link"):
-                st.markdown(f"[Open article]({item['link']})")
-            st.markdown("</div>", unsafe_allow_html=True)
+            st.markdown(f"""
+            <div class="card">
+                <p><strong><a href="{item['link']}" target="_blank">{item['title']}</a></strong></p>
+                <p>{item['publisher']} • {item.get('ticker', '')}</p>
+                <p>{item.get('summary', '')}</p>
+            </div>
+            """, unsafe_allow_html=True)
 
     if not selected_news:
-        st.info("No news found right now. Try a different ticker or check again in a minute.")
+        st.info("No news found right now.")
 
-    if st.button("Refresh News Now"):
-        st.cache_data.clear()
-        st.rerun()
 
 # =============================
-# PROFILES
+# PROFILES PAGE
 # =============================
-elif st.session_state.page == "Profiles":
-    st.subheader("Search Profiles")
+def profiles_page():
+    st.markdown('<div class="main-title">Profiles</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="subtitle">Search users by username or user ID</div>',
+        unsafe_allow_html=True
+    )
 
     search_user = st.text_input("Search by username or user ID")
 
-    if search_user:
-        matched_username = find_username_by_name_or_id(search_user)
+    if not search_user:
+        st.info("Search for a user to view their public profile.")
+        return
 
-        if not matched_username:
-            st.error("User not found")
-        else:
-            st.write(f"**Username:** {matched_username}")
-            st.write(f"**User ID:** {get_user_id(matched_username)}")
+    matched_username = find_username_by_name_or_id(search_user)
 
-            visibility = get_user_visibility(matched_username)
+    if not matched_username:
+        st.error("User not found")
+        return
 
-            if visibility == "private":
-                st.warning("This account is private 🔒")
-            else:
-                st.success("📊 Public Portfolio")
+    st.write(f"**Username:** {matched_username}")
+    st.write(f"**User ID:** {get_user_id(matched_username)}")
 
-                df = build_public_portfolio_allocations(matched_username)
-                insights = build_public_profile_insights(matched_username)
+    visibility = get_user_visibility(matched_username)
 
-                if not df.empty:
-                    fig, ax = plt.subplots(figsize=(6, 6))
-                    ax.pie(
-                        df["Percent"],
-                        labels=df["Ticker"],
-                        autopct="%1.1f%%"
-                    )
-                    ax.set_title(f"{matched_username}'s Portfolio Allocation")
-                    st.pyplot(fig)
-                else:
-                    st.info("No public portfolio data available")
+    if visibility == "private":
+        st.warning("This account is private 🔒")
+        return
 
-                st.markdown("<div class='card'>", unsafe_allow_html=True)
-                st.markdown("<div class='section-title'>Performance Insights</div>", unsafe_allow_html=True)
-                st.write(f"**Success rate:** {insights['win_rate']:.1f}% 📊")
-                st.write(f"**Trend:** {insights['trend_text']}")
-                st.write(f"**Sector strength:** {insights['category_text']}")
-                st.write(f"**Risk level:** {insights['risk_text']}")
-                st.markdown("</div>", unsafe_allow_html=True)
+    st.success("📊 Public Portfolio")
 
-# =============================
-# SETTINGS
-# =============================
-elif st.session_state.page == "Settings":
-    st.subheader("Account Settings")
+    insights = build_public_profile_insights(matched_username)
+    public_portfolios = get_user_portfolios(matched_username)
 
-    visibility = get_user_visibility(user)
-    st.write(f"Current visibility: **{visibility.title()}**")
-    st.write(f"**Your user ID:** `{get_user_id(user)}`")
+    all_rows = []
+    for rows in public_portfolios.values():
+        all_rows.extend(rows)
 
-    col1, col2 = st.columns(2)
+    df = build_portfolio_df(all_rows)
 
-    with col1:
-        if st.button("🌍 Make Public"):
-            set_user_visibility(user, "public")
-            st.success("Profile set to public")
-            st.rerun()
-
-    with col2:
-        if st.button("🔒 Make Private"):
-            set_user_visibility(user, "private")
-            st.success("Profile set to private")
-            st.rerun()
-
-# =============================
-# HISTORY
-# =============================
-elif st.session_state.page == "History":
-    st.subheader("Trade History")
-
-    current_sales = get_current_sales()
-    if current_sales:
-        sales_df = pd.DataFrame(current_sales)
-        st.markdown("### Sales History")
-        st.dataframe(sales_df, use_container_width=True)
+    if not df.empty:
+        st.dataframe(df, use_container_width=True)
     else:
-        st.info("No sales yet")
+        st.info("No public portfolio data available")
 
-    st.markdown("### Current Portfolio Snapshot")
-    if not portfolio_df.empty:
-        st.dataframe(portfolio_df, use_container_width=True)
-    else:
-        st.info("No trades yet")
+    st.markdown("### Performance Insights")
+    st.write(f"**Portfolio value:** ${insights['value']:,.2f}")
+    st.write(f"**Profit:** ${insights['profit']:,.2f}")
+    st.write(f"**Return %:** {insights['pct']:.2f}%")
+    st.write(f"**Best asset:** {insights['best']}")
+    st.write(f"**Worst asset:** {insights['worst']}")
+    st.write(f"**Win rate:** {insights['win_rate']}")
+    st.write(f"**Risk level:** {insights['risk']}")
+
+
+# =============================
+# SETTINGS PAGE
+# =============================
+def settings_page():
+    st.markdown('<div class="main-title">Settings</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="subtitle">Manage your account and profile visibility</div>',
+        unsafe_allow_html=True
+    )
+
+    user = st.session_state.user
+    current_visibility = get_user_visibility(user)
+
+    st.write(f"**Logged in as:** {user}")
+    st.write(f"**Email:** {users[user].get('email', '')}")
+    st.write(f"**User ID:** {get_user_id(user)}")
+    st.write(f"**Current visibility:** {current_visibility}")
+
+    new_visibility = st.selectbox(
+        "Profile visibility",
+        ["private", "public"],
+        index=0 if current_visibility == "private" else 1
+    )
+
+    if st.button("Update Visibility"):
+        set_user_visibility(user, new_visibility)
+        st.success("Visibility updated")
+        st.rerun()
+
+    st.markdown("---")
+    st.markdown("### Password Reset")
+    st.caption("Use the Forgot Password tab on the login screen to send yourself a reset email.")
+# =============================
+# EXTRA PORTFOLIO / PROFILE HELPERS
+# =============================
+def get_user_portfolios(username):
+    if username not in portfolios:
+        portfolios[username] = {"Main": []}
+        save_json(PORTFOLIO_FILE, portfolios)
+
+    if isinstance(portfolios[username], list):
+        portfolios[username] = {"Main": portfolios[username]}
+        save_json(PORTFOLIO_FILE, portfolios)
+
+    if "Main" not in portfolios[username]:
+        portfolios[username]["Main"] = []
+        save_json(PORTFOLIO_FILE, portfolios)
+
+    return portfolios[username]
+
+
+def build_portfolio_df(portfolio):
+    rows = []
+
+    for item in portfolio:
+        ticker = item.get("ticker", "")
+        shares = float(item.get("shares", 0))
+        avg_price = float(item.get("avg_price", 0))
+
+        if not ticker or shares <= 0:
+            continue
+
+        current_price = get_price(ticker)
+        if current_price is None:
+            continue
+
+        value = shares * current_price
+        invested = shares * avg_price
+        profit = value - invested
+        pct = (profit / invested * 100) if invested > 0 else 0.0
+
+        rows.append({
+            "Ticker": ticker,
+            "Shares": round(shares, 6),
+            "Avg Price": round(avg_price, 2),
+            "Price": round(current_price, 2),
+            "Value": round(value, 2),
+            "Profit": round(profit, 2),
+            "%": round(pct, 2),
+        })
+
+    if not rows:
+        return pd.DataFrame()
+
+    return pd.DataFrame(rows)
+
+
+def get_user_visibility(username):
+    if username in users and isinstance(users[username], dict):
+        return users[username].get("visibility", "private")
+    return "private"
+
+
+def set_user_visibility(username, visibility):
+    if username in users and isinstance(users[username], dict):
+        users[username]["visibility"] = visibility
+        save_json(USERS_FILE, users)
+
+
+def build_public_profile_insights(username):
+    user_portfolios = get_user_portfolios(username)
+
+    all_rows = []
+    for portfolio_rows in user_portfolios.values():
+        if isinstance(portfolio_rows, list):
+            all_rows.extend(portfolio_rows)
+
+    df = build_portfolio_df(all_rows)
+
+    total_value = float(df["Value"].sum()) if not df.empty else 0.0
+    total_profit = float(df["Profit"].sum()) if not df.empty else 0.0
+    invested = total_value - total_profit
+    total_pct = (total_profit / invested * 100) if invested > 0 else 0.0
+
+    best_asset = "N/A"
+    worst_asset = "N/A"
+
+    if not df.empty:
+        sorted_df = df.sort_values("%", ascending=False)
+        best_asset = sorted_df.iloc[0]["Ticker"]
+        worst_asset = sorted_df.iloc[-1]["Ticker"]
+
+    return {
+        "value": total_value,
+        "profit": total_profit,
+        "pct": total_pct,
+        "best": best_asset,
+        "worst": worst_asset,
+        "win_rate": "N/A",
+        "risk": "Medium",
+    }
+# =============================
+# MAIN APP ROUTER (FULLY FIXED)
+# =============================
+def main_app():
+    sidebar()
+
+    if st.session_state.page == "Home":
+        home_page()
+
+    elif st.session_state.page == "Portfolio":
+        portfolio_page()
+
+    elif st.session_state.page == "AI Suggestions":
+        ai_suggestions_page()
+
+    elif st.session_state.page == "Market":
+        market_page()
+
+    elif st.session_state.page == "News":
+        news_page()
+
+    elif st.session_state.page == "Profiles":
+        profiles_page()
+
+    elif st.session_state.page == "Settings":
+        settings_page()
+# =============================
+# APP ENTRY
+# =============================
+if not st.session_state.logged_in:
+    login_page()
+else:
+    main_app()
